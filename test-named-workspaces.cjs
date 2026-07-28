@@ -16,6 +16,9 @@ const {
   loadWorkspaceScope,
   parseWorkspaceRootsJson,
 } = require("./daemon/config-loader.cjs");
+const { createFileReadService } = require("./packages/daemon-core/file-read-service.cjs");
+const { createFileSearchService } = require("./packages/daemon-core/file-search-service.cjs");
+const { createFileWriteService } = require("./packages/daemon-core/file-write-service.cjs");
 
 async function rejectsCode(fn, code) {
   await assert.rejects(fn, (error) => error?.code === code);
@@ -54,10 +57,12 @@ async function main() {
 
     const relative = await resolveWorkspacePath(projects, "content-analyzer/README.md", { mustExist: true });
     assert.equal(relative.workspace, "projects");
+    assert.equal(relative.isDefaultWorkspace, true);
     assert.equal(relative.namedPath, "projects:/content-analyzer/README.md");
 
     const named = await resolveWorkspacePath(projects, "openclaw:/config.json", { mustExist: true });
     assert.equal(named.workspace, "openclaw");
+    assert.equal(named.isDefaultWorkspace, false);
     assert.equal(named.realPath, await fs.realpath(path.join(openclaw, "config.json")));
 
     const uri = await resolveWorkspacePath(projects, "workspace://openclaw/workspace", { mustExist: true });
@@ -66,6 +71,42 @@ async function main() {
 
     const absolute = await resolveWorkspacePath(projects, path.join(openclaw, "config.json"), { mustExist: true });
     assert.equal(absolute.workspace, "openclaw");
+
+    const reader = createFileReadService({ workspaceRoot: projects });
+    const writer = createFileWriteService({ workspaceRoot: projects });
+    const search = createFileSearchService({ workspaceRoot: projects });
+
+    const defaultRead = await reader.readText("content-analyzer/README.md");
+    assert.equal(defaultRead.workspace, "projects");
+    assert.equal(defaultRead.path, "content-analyzer/README.md");
+    assert.equal(defaultRead.namedPath, "projects:/content-analyzer/README.md");
+
+    const namedRead = await reader.readText("openclaw:/config.json");
+    assert.equal(namedRead.workspace, "openclaw");
+    assert.equal(namedRead.path, "openclaw:/config.json");
+    assert.equal(namedRead.relativePath, "config.json");
+
+    const written = await writer.writeText("openclaw:/workspace/generated.txt", "generated workspace output\n");
+    assert.equal(written.workspace, "openclaw");
+    assert.equal(written.path, "openclaw:/workspace/generated.txt");
+    assert.equal(written.relativePath, "workspace/generated.txt");
+
+    const globbed = await search.glob("**/*.txt", { cwd: "openclaw:/workspace" });
+    assert.equal(globbed.workspace, "openclaw");
+    assert.equal(globbed.cwd, "openclaw:/workspace");
+    assert.deepEqual(globbed.files, ["openclaw:/workspace/generated.txt"]);
+    assert.equal(globbed.entries[0].namedPath, "openclaw:/workspace/generated.txt");
+
+    const grepped = await search.grep({ pattern: "generated workspace", cwd: "openclaw:/workspace" });
+    assert.equal(grepped.matches[0].path, "openclaw:/workspace/generated.txt");
+    assert.equal(grepped.matches[0].workspace, "openclaw");
+
+    const manifest = await reader.manifest("openclaw:/workspace");
+    assert.equal(manifest.root, "openclaw:/workspace");
+    assert.equal(manifest.entries[0].path, "openclaw:/workspace/generated.txt");
+
+    const removed = await writer.removeFile("openclaw:/workspace/generated.txt", { expectedEtag: written.etag });
+    assert.equal(removed.path, "openclaw:/workspace/generated.txt");
 
     await rejectsCode(
       () => resolveWorkspacePath(projects, "missing:/file.txt", { mustExist: false }),
@@ -161,6 +202,13 @@ async function main() {
         DEFAULT_WORKSPACE: "projects",
       }),
       (error) => error?.code === "EWORKSPACE_CONFIG",
+    );
+    assert.throws(
+      () => loadWorkspaceScope({
+        WORKSPACE_ROOTS_JSON: JSON.stringify({ projects, nested: path.join(projects, "content-analyzer") }),
+        DEFAULT_WORKSPACE: "projects",
+      }),
+      (error) => error?.code === "EWORKSPACE_CONFIG" && /overlaps/.test(error.message),
     );
 
     const { validateProjectProfile, resolveProjectPath } = await import("./packages/client-core/project-profile.js");
