@@ -74,18 +74,22 @@ function normalizeWorkspaceScope({ defaultWorkspace = "default", roots, workspac
   }
 
   const normalizedRoots = {};
-  const seenPaths = new Map();
+  const rootBoundaries = [];
   for (const [rawName, rawRoot] of Object.entries(sourceRoots)) {
     const name = normalizeWorkspaceName(rawName);
     if (typeof rawRoot !== "string" || !rawRoot.trim()) {
       throw workspaceConfigError(`Workspace '${name}' must have a non-empty path`);
     }
     const root = path.resolve(rawRoot.trim());
-    const key = comparisonPath(root);
-    if (seenPaths.has(key)) {
-      throw workspaceConfigError(`Workspace '${name}' duplicates workspace '${seenPaths.get(key)}'`);
+    const boundary = canonicalSyncIfExists(root);
+    const conflict = rootBoundaries.find((item) => (
+      isWithinSingle(boundary, item.boundary) || isWithinSingle(item.boundary, boundary)
+    ));
+    if (conflict) {
+      const relation = boundary === conflict.boundary ? "duplicates" : "overlaps";
+      throw workspaceConfigError(`Workspace '${name}' ${relation} workspace '${conflict.name}'`);
     }
-    seenPaths.set(key, name);
+    rootBoundaries.push({ name, boundary });
     normalizedRoots[name] = root;
   }
 
@@ -104,11 +108,18 @@ function normalizeWorkspaceScope({ defaultWorkspace = "default", roots, workspac
 
 function configureWorkspaceRoots(options = {}) {
   const scope = normalizeWorkspaceScope(options);
-  const aliases = new Set([
+  const defaultRootAliases = new Set([
     comparisonPath(scope.defaultRoot),
     canonicalSyncIfExists(scope.defaultRoot),
   ]);
-  activeWorkspaceScope = Object.freeze({ ...scope, defaultRootAliases: aliases });
+  const allowedRootAliases = new Set(
+    Object.values(scope.roots).flatMap((root) => [comparisonPath(root), canonicalSyncIfExists(root)]),
+  );
+  activeWorkspaceScope = Object.freeze({
+    ...scope,
+    defaultRootAliases,
+    allowedRootAliases,
+  });
   return activeWorkspaceScope;
 }
 
@@ -127,7 +138,7 @@ function isWithin(candidate, root) {
   if (!activeWorkspaceScope) return false;
   const rootKey = comparisonPath(root);
   if (!activeWorkspaceScope.defaultRootAliases.has(rootKey)) return false;
-  return isWithinAny(candidate, Object.values(activeWorkspaceScope.roots));
+  return isWithinAny(candidate, [...activeWorkspaceScope.allowedRootAliases]);
 }
 
 function accessDenied(inputPath, workspaceRoot) {
@@ -240,6 +251,20 @@ function workspacePath(workspace, root, fullPath) {
   return relative && relative !== "." ? `${workspace}:/${relative}` : `${workspace}:/`;
 }
 
+function workspaceResultPath(resolved, fullPath = resolved?.realPath || resolved?.path) {
+  if (!resolved?.workspace || !resolved?.root || !fullPath) {
+    throw new TypeError("resolved workspace path is required");
+  }
+  const relativePath = path.relative(resolved.root, fullPath).replace(/\\/g, "/") || ".";
+  const namedPath = workspacePath(resolved.workspace, resolved.root, fullPath);
+  return {
+    workspace: resolved.workspace,
+    path: resolved.isDefaultWorkspace ? relativePath : namedPath,
+    relativePath,
+    namedPath,
+  };
+}
+
 async function resolveWorkspacePath(workspaceRoot, inputPath, { mustExist = false } = {}) {
   if (typeof workspaceRoot !== "string" || !workspaceRoot.trim()) {
     throw new TypeError("workspaceRoot is required");
@@ -271,6 +296,8 @@ async function resolveWorkspacePath(workspaceRoot, inputPath, { mustExist = fals
     return {
       workspace: selected.workspace,
       workspaceName: selected.workspace,
+      defaultWorkspace: scope.defaultWorkspace,
+      isDefaultWorkspace: selected.workspace === scope.defaultWorkspace,
       namedPath: workspacePath(selected.workspace, rootLexical, candidateLexical),
       root: rootReal,
       path: candidateLexical,
@@ -291,6 +318,8 @@ async function resolveWorkspacePath(workspaceRoot, inputPath, { mustExist = fals
   return {
     workspace: selected.workspace,
     workspaceName: selected.workspace,
+    defaultWorkspace: scope.defaultWorkspace,
+    isDefaultWorkspace: selected.workspace === scope.defaultWorkspace,
     namedPath: workspacePath(selected.workspace, rootLexical, candidateLexical),
     root: rootReal,
     path: candidateLexical,
@@ -311,4 +340,5 @@ module.exports = {
   resolveWorkspacePath,
   sameFileIdentity,
   workspacePath,
+  workspaceResultPath,
 };
