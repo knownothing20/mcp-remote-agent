@@ -1,6 +1,11 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
+const {
+  configureWorkspaceRoots,
+  normalizeWorkspaceName,
+  normalizeWorkspaceScope,
+} = require("../packages/daemon-core/path-guard.cjs");
 
 function decodeEnvValue(raw) {
   const value = String(raw ?? "").trim();
@@ -81,6 +86,86 @@ async function firstExisting(paths) {
   return null;
 }
 
+function workspaceConfigError(message, cause) {
+  const error = new Error(message);
+  error.code = "EWORKSPACE_CONFIG";
+  error.statusCode = 500;
+  if (cause) error.cause = cause;
+  return error;
+}
+
+function parseWorkspaceRootsJson(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (cause) {
+    throw workspaceConfigError("WORKSPACE_ROOTS_JSON must be valid JSON", cause);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw workspaceConfigError("WORKSPACE_ROOTS_JSON must be a JSON object");
+  }
+  if (parsed.roots !== undefined) {
+    if (!parsed.roots || typeof parsed.roots !== "object" || Array.isArray(parsed.roots)) {
+      throw workspaceConfigError("WORKSPACE_ROOTS_JSON.roots must be an object");
+    }
+    return { roots: parsed.roots, defaultWorkspace: parsed.default || parsed.defaultWorkspace || "" };
+  }
+  return { roots: parsed, defaultWorkspace: "" };
+}
+
+function loadWorkspaceScope(values, runtimeWorkspaceRoot = "") {
+  const fallbackRoot = path.resolve(runtimeWorkspaceRoot || values.WORKSPACE_ROOT || "/home/user/workspace");
+  if (runtimeWorkspaceRoot) {
+    const defaultWorkspace = normalizeWorkspaceName(values.DEFAULT_WORKSPACE || "default", "default workspace");
+    return normalizeWorkspaceScope({
+      defaultWorkspace,
+      roots: { [defaultWorkspace]: fallbackRoot },
+    });
+  }
+
+  const parsed = parseWorkspaceRootsJson(values.WORKSPACE_ROOTS_JSON);
+  if (!parsed) {
+    const defaultWorkspace = normalizeWorkspaceName(values.DEFAULT_WORKSPACE || "default", "default workspace");
+    return normalizeWorkspaceScope({
+      defaultWorkspace,
+      roots: { [defaultWorkspace]: fallbackRoot },
+    });
+  }
+
+  const rootNames = Object.keys(parsed.roots);
+  const defaultWorkspace = normalizeWorkspaceName(
+    values.DEFAULT_WORKSPACE || parsed.defaultWorkspace || rootNames[0] || "default",
+    "default workspace",
+  );
+  const roots = { ...parsed.roots };
+  if (!roots[defaultWorkspace] && values.WORKSPACE_ROOT) roots[defaultWorkspace] = fallbackRoot;
+  return normalizeWorkspaceScope({ defaultWorkspace, roots });
+}
+
+async function loadWorkspaceScopeFromSources(values, runtimeWorkspaceRoot = "", envFilePath = null, baseDir = __dirname) {
+  if (runtimeWorkspaceRoot || String(values.WORKSPACE_ROOTS_JSON || "").trim()) {
+    return { scope: loadWorkspaceScope(values, runtimeWorkspaceRoot), workspaceConfigPath: null };
+  }
+
+  const explicitPath = String(values.WORKSPACE_ROOTS_FILE || "").trim();
+  const configBaseDir = envFilePath ? path.dirname(envFilePath) : baseDir;
+  const workspaceConfigPath = explicitPath
+    ? path.resolve(configBaseDir, explicitPath)
+    : path.resolve(configBaseDir, "workspaces.json");
+  try {
+    const raw = await fs.readFile(workspaceConfigPath, "utf8");
+    return {
+      scope: loadWorkspaceScope({ ...values, WORKSPACE_ROOTS_JSON: raw }, runtimeWorkspaceRoot),
+      workspaceConfigPath,
+    };
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    return { scope: loadWorkspaceScope(values, runtimeWorkspaceRoot), workspaceConfigPath: null };
+  }
+}
+
 function createDaemonConfigLoader({ baseDir = __dirname, envPath } = {}) {
   let selectedEnvPath = envPath ? path.resolve(envPath) : null;
   let cache = null;
@@ -126,7 +211,14 @@ function createDaemonConfigLoader({ baseDir = __dirname, envPath } = {}) {
     const legacyToken = String(values.AUTH_TOKEN || values.MCP_REMOTE_AUTH_TOKEN || values.NIUMA_SSH_AUTH_TOKEN || "").trim();
     if (legacyToken && tokenClientMap.size === 0) tokenClientMap.set(legacyToken, "legacy-client");
 
-    const workspaceRoot = path.resolve(runtimeWorkspaceRoot || values.WORKSPACE_ROOT || "/home/user/workspace");
+    const { scope: workspaceScope, workspaceConfigPath } = await loadWorkspaceScopeFromSources(
+      values,
+      runtimeWorkspaceRoot,
+      file.filePath,
+      baseDir,
+    );
+    configureWorkspaceRoots(workspaceScope);
+    const workspaceRoot = workspaceScope.defaultRoot;
     const jobsDir = path.resolve(values.AGENTPORT_JOBS_DIR || values.JOBS_DIR || path.join(baseDir, "..", "server", "jobs"));
     const execTimeoutMs = intValue(values.EXEC_TIMEOUT_MS, 120_000, 1000, 24 * 60 * 60_000);
     const jobMaxTimeoutMs = intValue(values.MAX_JOB_TIMEOUT_MS, 7 * 24 * 60 * 60_000, 1000, 30 * 24 * 60 * 60_000);
@@ -135,6 +227,10 @@ function createDaemonConfigLoader({ baseDir = __dirname, envPath } = {}) {
       envPath: file.filePath,
       values,
       workspaceRoot,
+      workspaceConfigPath,
+      workspaceRoots: workspaceScope.roots,
+      workspaceNames: workspaceScope.names,
+      defaultWorkspace: workspaceScope.defaultWorkspace,
       jobsDir,
       serverId: String(values.AGENTPORT_SERVER_ID || values.SERVER_ID || os.hostname()).trim(),
       workspaceId: String(values.AGENTPORT_WORKSPACE_ID || values.WORKSPACE_ID || workspaceRoot).trim(),
@@ -184,7 +280,10 @@ module.exports = {
   createDaemonConfigLoader,
   decodeEnvValue,
   intValue,
+  loadWorkspaceScope,
+  loadWorkspaceScopeFromSources,
   parseAdminTokens,
   parseEnvText,
   parseTokenMap,
+  parseWorkspaceRootsJson,
 };
