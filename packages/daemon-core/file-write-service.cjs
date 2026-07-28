@@ -1,6 +1,5 @@
 const fs = require("node:fs/promises");
-const path = require("node:path");
-const { resolveWorkspacePath } = require("./path-guard.cjs");
+const { resolveWorkspacePath, workspaceResultPath } = require("./path-guard.cjs");
 const { atomicWriteFile, sha256 } = require("./atomic-write.cjs");
 const { createKeyLock } = require("./key-lock.cjs");
 
@@ -70,7 +69,7 @@ function createFileWriteService({ workspaceRoot } = {}) {
 
       return {
         success: true,
-        path: path.relative(resolved.root, resolved.path).replace(/\\/g, "/"),
+        ...workspaceResultPath(resolved, resolved.path),
         etag: readbackEtag,
         previousEtag: currentEtag,
         bytes: result.bytes,
@@ -94,10 +93,11 @@ function createFileWriteService({ workspaceRoot } = {}) {
       if (expectedEtag && expectedEtag !== currentEtag) {
         throw conflict("Delete conflict: expectedEtag mismatch", currentEtag);
       }
+      const fields = workspaceResultPath(resolved, resolved.realPath);
       await fs.rm(resolved.realPath);
       return {
         success: true,
-        path: path.relative(resolved.root, resolved.realPath).replace(/\\/g, "/"),
+        ...fields,
         previousEtag: currentEtag,
       };
     });
