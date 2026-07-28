@@ -1,10 +1,37 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+const WORKSPACE_NAME_RE = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/;
+
+function parseNamedRemoteRoot(value) {
+  const uri = value.match(/^workspace:\/\/([A-Za-z][A-Za-z0-9._-]{0,63})(?:\/(.*))?$/);
+  if (uri) return { workspace: uri[1], path: `/${uri[2] || ""}` };
+  const shorthand = value.match(/^([A-Za-z][A-Za-z0-9._-]{0,63}):(?:\/(.*))?$/);
+  if (shorthand) return { workspace: shorthand[1], path: `/${shorthand[2] || ""}` };
+  return null;
+}
+
+function normalizeNamedRoot(named) {
+  if (!WORKSPACE_NAME_RE.test(named.workspace)) throw new Error("project.root has an invalid workspace name");
+  const remotePath = path.posix.normalize(named.path || "/");
+  return `${named.workspace}:${remotePath === "/" ? "/" : remotePath.replace(/\/$/, "")}`;
+}
+
 function normalizeRemoteRoot(root) {
   const value = String(root || "").trim();
-  if (!value || !value.startsWith("/")) throw new Error("project.root must be an absolute POSIX path");
+  const named = parseNamedRemoteRoot(value);
+  if (named) return normalizeNamedRoot(named);
+  if (!value || !value.startsWith("/")) {
+    throw new Error("project.root must be an absolute POSIX path or a named workspace path");
+  }
   return path.posix.normalize(value).replace(/\/$/, "") || "/";
+}
+
+function splitRemoteRoot(root) {
+  const normalized = normalizeRemoteRoot(root);
+  const named = parseNamedRemoteRoot(normalized);
+  if (!named) return { workspace: null, rootPath: normalized };
+  return { workspace: named.workspace, rootPath: path.posix.normalize(named.path || "/") };
 }
 
 export function validateProjectProfile(name, profile) {
@@ -25,14 +52,14 @@ export function validateProjectProfile(name, profile) {
 }
 
 export function resolveProjectPath(profile, relativePath = ".") {
-  const root = normalizeRemoteRoot(profile?.root);
-  const candidate = path.posix.resolve(root, String(relativePath || "."));
-  if (candidate !== root && !candidate.startsWith(`${root}/`)) {
-    const error = new Error(`Path '${relativePath}' escapes project root '${root}'`);
+  const { workspace, rootPath } = splitRemoteRoot(profile?.root);
+  const candidate = path.posix.resolve(rootPath, String(relativePath || "."));
+  if (candidate !== rootPath && !candidate.startsWith(`${rootPath}/`)) {
+    const error = new Error(`Path '${relativePath}' escapes project root '${profile?.root}'`);
     error.code = "EPROJECTPATH";
     throw error;
   }
-  return candidate;
+  return workspace ? `${workspace}:${candidate}` : candidate;
 }
 
 export async function loadProjectProfiles(filePath) {
