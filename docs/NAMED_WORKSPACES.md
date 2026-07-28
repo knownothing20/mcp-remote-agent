@@ -72,7 +72,9 @@ workspace://openclaw/workspace/AGENTS.md
 ```
 
 Relative paths use the default workspace. Absolute paths remain compatible and
-are assigned to the most specific configured root containing the path.
+are assigned to the configured root containing the path. Non-default workspace
+results return a named `path` plus `relativePath`, `namedPath`, and `workspace`
+metadata so follow-up calls cannot accidentally fall back to the default root.
 
 Named project profiles are also supported:
 
@@ -92,7 +94,7 @@ Named project profiles are also supported:
 
 - Workspace names must match `[A-Za-z][A-Za-z0-9._-]{0,63}`.
 - A daemon accepts at most 32 named roots.
-- Duplicate normalized roots are rejected.
+- Duplicate or overlapping normalized roots are rejected.
 - `..` traversal cannot leave the selected named root.
 - A symlink inside one named workspace cannot escape to another workspace or to
   an unconfigured directory.
