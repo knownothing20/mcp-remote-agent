@@ -1,0 +1,7 @@
+{
+  "default": "projects",
+  "roots": {
+    "projects": "/home/YOUR_USER/workspace",
+    "openclaw": "/home/YOUR_USER/.openclaw"
+  }
+}
