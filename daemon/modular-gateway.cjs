@@ -171,6 +171,8 @@ function proxyRequest(req, res, legacyOrigin) {
 function runtimeKey(config) {
   return JSON.stringify({
     workspaceRoot: config.workspaceRoot,
+    defaultWorkspace: config.defaultWorkspace,
+    workspaceRoots: config.workspaceRoots,
     jobsDir: config.jobsDir,
     command: config.command,
     exec: config.exec,
@@ -193,13 +195,14 @@ function createServiceRegistry() {
         queueTimeoutMs: config.exec.queueTimeoutMs,
       });
       cache.set(key, Object.freeze({
-        reader: createFileReadService({ workspaceRoot: config.workspaceRoot }),
-        search: createFileSearchService({ workspaceRoot: config.workspaceRoot }),
-        writer: createFileWriteService({ workspaceRoot: config.workspaceRoot }),
+        reader: createFileReadService({ workspaceRoot: config.workspaceRoot, workspaceScope: config.workspaceScope }),
+        search: createFileSearchService({ workspaceRoot: config.workspaceRoot, workspaceScope: config.workspaceScope }),
+        writer: createFileWriteService({ workspaceRoot: config.workspaceRoot, workspaceScope: config.workspaceScope }),
         policy,
         queue,
         exec: createExecService({
           workspaceRoot: config.workspaceRoot,
+          workspaceScope: config.workspaceScope,
           policy,
           queue,
           defaultTimeoutMs: config.exec.timeoutMs,
@@ -209,6 +212,7 @@ function createServiceRegistry() {
         jobs: createJobService({
           jobsDir: config.jobsDir,
           workspaceRoot: config.workspaceRoot,
+          workspaceScope: config.workspaceScope,
           policy,
           maxConcurrency: config.jobs.maxConcurrency,
           queueTimeoutMs: config.jobs.queueTimeoutMs,

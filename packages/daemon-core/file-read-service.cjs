@@ -1,7 +1,7 @@
 const fsSync = require("node:fs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
-const { resolveWorkspacePath, workspaceResultPath } = require("./path-guard.cjs");
+const { createWorkspacePathGuard, workspaceResultPath } = require("./path-guard.cjs");
 const { sha256 } = require("./atomic-write.cjs");
 
 function positiveInt(value, fallback, min = 1, max = Number.MAX_SAFE_INTEGER) {
@@ -140,11 +140,12 @@ async function readLineRangeWithHash(filePath, startLine, requestedEndLine, opti
   };
 }
 
-function createFileReadService({ workspaceRoot, defaultMaxBytes = 2 * 1024 * 1024 } = {}) {
+function createFileReadService({ workspaceRoot, workspaceScope, defaultMaxBytes = 2 * 1024 * 1024 } = {}) {
   if (!workspaceRoot) throw new TypeError("workspaceRoot is required");
+  const pathGuard = createWorkspacePathGuard(workspaceScope || { workspaceRoot });
 
   async function stat(inputPath) {
-    const resolved = await resolveWorkspacePath(workspaceRoot, inputPath, { mustExist: true });
+    const resolved = await pathGuard.resolve(inputPath, { mustExist: true });
     const value = await fs.stat(resolved.realPath);
     return {
       ...workspaceResultPath(resolved),
@@ -157,7 +158,7 @@ function createFileReadService({ workspaceRoot, defaultMaxBytes = 2 * 1024 * 102
   }
 
   async function readText(inputPath, options = {}) {
-    const resolved = await resolveWorkspacePath(workspaceRoot, inputPath, { mustExist: true });
+    const resolved = await pathGuard.resolve(inputPath, { mustExist: true });
     const value = await fs.stat(resolved.realPath);
     if (!value.isFile()) {
       const error = new Error("Target is not a file");
@@ -211,7 +212,7 @@ function createFileReadService({ workspaceRoot, defaultMaxBytes = 2 * 1024 * 102
   }
 
   async function readBytes(inputPath, options = {}) {
-    const resolved = await resolveWorkspacePath(workspaceRoot, inputPath, { mustExist: true });
+    const resolved = await pathGuard.resolve(inputPath, { mustExist: true });
     const value = await fs.stat(resolved.realPath);
     if (!value.isFile()) {
       const error = new Error("Target is not a file");
@@ -249,7 +250,7 @@ function createFileReadService({ workspaceRoot, defaultMaxBytes = 2 * 1024 * 102
   }
 
   async function manifest(inputPath = ".", options = {}) {
-    const root = await resolveWorkspacePath(workspaceRoot, inputPath, { mustExist: true });
+    const root = await pathGuard.resolve(inputPath, { mustExist: true });
     const rootStat = await fs.stat(root.realPath);
     if (!rootStat.isDirectory()) {
       const error = new Error("Manifest target must be a directory");

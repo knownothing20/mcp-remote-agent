@@ -112,10 +112,17 @@ function createDevelopmentFrontServer({ baseOrigin, configLoader, authorizeApi, 
     const home = config.values?.HOME || process.env.HOME || path.dirname(config.workspaceRoot);
     const sessionsDir = path.resolve(config.values?.AGENTPORT_SESSIONS_DIR || path.join(home, '.agentport', 'sessions'));
     const worktreesDir = path.resolve(config.values?.AGENTPORT_WORKTREES_DIR || path.join(config.workspaceRoot, '.agentport-worktrees'));
-    const key = JSON.stringify({ root: config.workspaceRoot, sessionsDir, worktreesDir });
+    const key = JSON.stringify({
+      root: config.workspaceRoot,
+      defaultWorkspace: config.defaultWorkspace,
+      workspaceRoots: config.workspaceRoots,
+      sessionsDir,
+      worktreesDir,
+    });
     if (!services.has(key)) {
       services.set(key, (serviceFactory || createDevelopmentSessionService)({
         workspaceRoot: config.workspaceRoot,
+        workspaceScope: config.workspaceScope,
         sessionsDir,
         worktreesDir,
         defaultLeaseMs: Number(config.values?.AGENTPORT_SESSION_LEASE_MS || 1_800_000),

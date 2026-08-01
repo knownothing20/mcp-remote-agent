@@ -11,7 +11,6 @@ const nativeRealpathSync = fsNative.realpathSync?.native
   : fsNative.realpathSync;
 
 const WORKSPACE_NAME_RE = /^[A-Za-z][A-Za-z0-9._-]{0,63}$/;
-let activeWorkspaceScope = null;
 
 function comparisonPath(value) {
   let normalized = path.resolve(String(value || ""));
@@ -106,43 +105,34 @@ function normalizeWorkspaceScope({ defaultWorkspace = "default", roots, workspac
   });
 }
 
-function configureWorkspaceRoots(options = {}) {
-  const scope = normalizeWorkspaceScope(options);
-  const defaultRootAliases = new Set([
-    comparisonPath(scope.defaultRoot),
-    canonicalSyncIfExists(scope.defaultRoot),
-  ]);
-  const allowedRootAliases = new Set(
-    Object.values(scope.roots).flatMap((root) => [comparisonPath(root), canonicalSyncIfExists(root)]),
-  );
-  activeWorkspaceScope = Object.freeze({
-    ...scope,
-    defaultRootAliases,
-    allowedRootAliases,
-  });
-  return activeWorkspaceScope;
-}
-
-function clearWorkspaceRoots() {
-  activeWorkspaceScope = null;
-}
-
-function scopeForRoot(workspaceRoot) {
+function scopeForRoot(workspaceRoot, workspaceScope) {
   const root = comparisonPath(workspaceRoot);
-  if (activeWorkspaceScope?.defaultRootAliases?.has(root)) return activeWorkspaceScope;
+  if (workspaceScope) {
+    const scope = normalizeWorkspaceScope(workspaceScope);
+    const aliases = [comparisonPath(scope.defaultRoot), canonicalSyncIfExists(scope.defaultRoot)];
+    if (!aliases.includes(root)) {
+      throw workspaceConfigError("workspaceRoot must match the configured default workspace root");
+    }
+    return scope;
+  }
   return normalizeWorkspaceScope({ workspaceRoot: root, defaultWorkspace: "default" });
 }
 
-function isWithin(candidate, root) {
+function isWithin(candidate, root, workspaceScope) {
   if (isWithinSingle(candidate, root)) return true;
-  if (!activeWorkspaceScope) return false;
+  if (!workspaceScope) return false;
+  const scope = normalizeWorkspaceScope(workspaceScope);
   const rootKey = comparisonPath(root);
-  if (!activeWorkspaceScope.defaultRootAliases.has(rootKey)) return false;
-  return isWithinAny(candidate, [...activeWorkspaceScope.allowedRootAliases]);
+  const defaultRootAliases = [comparisonPath(scope.defaultRoot), canonicalSyncIfExists(scope.defaultRoot)];
+  if (!defaultRootAliases.includes(rootKey)) return false;
+  return isWithinAny(candidate, Object.values(scope.roots).flatMap((entry) => [
+    comparisonPath(entry),
+    canonicalSyncIfExists(entry),
+  ]));
 }
 
-function accessDenied(inputPath, workspaceRoot) {
-  const scope = scopeForRoot(workspaceRoot);
+function accessDenied(inputPath, workspaceRoot, workspaceScope) {
+  const scope = scopeForRoot(workspaceRoot, workspaceScope);
   const error = new Error(`Access denied: '${inputPath}' is outside configured workspace roots`);
   error.code = "EWORKSPACE";
   error.statusCode = 403;
@@ -265,7 +255,11 @@ function workspaceResultPath(resolved, fullPath = resolved?.realPath || resolved
   };
 }
 
-async function resolveWorkspacePath(workspaceRoot, inputPath, { mustExist = false } = {}) {
+async function resolveWorkspacePath(
+  workspaceRoot,
+  inputPath,
+  { mustExist = false, workspaceScope = null } = {},
+) {
   if (typeof workspaceRoot !== "string" || !workspaceRoot.trim()) {
     throw new TypeError("workspaceRoot is required");
   }
@@ -276,7 +270,7 @@ async function resolveWorkspacePath(workspaceRoot, inputPath, { mustExist = fals
     throw error;
   }
 
-  const scope = scopeForRoot(workspaceRoot);
+  const scope = scopeForRoot(workspaceRoot, workspaceScope);
   const selected = selectWorkspace(scope, inputPath);
   const rootLexical = path.resolve(selected.root);
   const rootReal = await canonicalRealpath(rootLexical);
@@ -285,13 +279,13 @@ async function resolveWorkspacePath(workspaceRoot, inputPath, { mustExist = fals
     : path.resolve(rootLexical, String(selected.relativePath || ".").replace(/^[/\\]+/, ""));
 
   if (!isWithinSingle(candidateLexical, rootLexical)) {
-    throw accessDenied(inputPath, workspaceRoot);
+    throw accessDenied(inputPath, workspaceRoot, scope);
   }
 
   if (mustExist) {
     const candidateReal = await canonicalRealpath(candidateLexical);
     if (!(await isWithinByIdentity(candidateReal, rootReal, [rootLexical]))) {
-      throw accessDenied(inputPath, workspaceRoot);
+      throw accessDenied(inputPath, workspaceRoot, scope);
     }
     return {
       workspace: selected.workspace,
@@ -308,12 +302,14 @@ async function resolveWorkspacePath(workspaceRoot, inputPath, { mustExist = fals
   const ancestorLexical = await nearestExistingAncestor(candidateLexical);
   const ancestorReal = await canonicalRealpath(ancestorLexical);
   if (!(await isWithinByIdentity(ancestorReal, rootReal, [rootLexical]))) {
-    throw accessDenied(inputPath, workspaceRoot);
+    throw accessDenied(inputPath, workspaceRoot, scope);
   }
 
   const remainder = path.relative(ancestorLexical, candidateLexical);
   const projectedReal = path.resolve(ancestorReal, remainder);
-  if (!isWithinSingle(projectedReal, rootReal)) throw accessDenied(inputPath, workspaceRoot);
+  if (!isWithinSingle(projectedReal, rootReal)) {
+    throw accessDenied(inputPath, workspaceRoot, scope);
+  }
 
   return {
     workspace: selected.workspace,
@@ -327,10 +323,29 @@ async function resolveWorkspacePath(workspaceRoot, inputPath, { mustExist = fals
   };
 }
 
+function createWorkspacePathGuard(options = {}) {
+  const scope = normalizeWorkspaceScope(options);
+  return Object.freeze({
+    scope,
+    defaultWorkspace: scope.defaultWorkspace,
+    defaultRoot: scope.defaultRoot,
+    roots: scope.roots,
+    names: scope.names,
+    resolve(inputPath, options = {}) {
+      return resolveWorkspacePath(scope.defaultRoot, inputPath, {
+        ...options,
+        workspaceScope: scope,
+      });
+    },
+    isWithin(candidate, root = scope.defaultRoot) {
+      return isWithin(candidate, root, scope);
+    },
+  });
+}
+
 module.exports = {
   canonicalRealpath,
-  clearWorkspaceRoots,
-  configureWorkspaceRoots,
+  createWorkspacePathGuard,
   isWithin,
   isWithinAny,
   isWithinByIdentity,

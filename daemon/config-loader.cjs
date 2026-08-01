@@ -2,7 +2,6 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
 const {
-  configureWorkspaceRoots,
   normalizeWorkspaceName,
   normalizeWorkspaceScope,
 } = require("../packages/daemon-core/path-guard.cjs");
@@ -217,7 +216,6 @@ function createDaemonConfigLoader({ baseDir = __dirname, envPath } = {}) {
       file.filePath,
       baseDir,
     );
-    configureWorkspaceRoots(workspaceScope);
     const workspaceRoot = workspaceScope.defaultRoot;
     const jobsDir = path.resolve(values.AGENTPORT_JOBS_DIR || values.JOBS_DIR || path.join(baseDir, "..", "server", "jobs"));
     const execTimeoutMs = intValue(values.EXEC_TIMEOUT_MS, 120_000, 1000, 24 * 60 * 60_000);
@@ -227,6 +225,7 @@ function createDaemonConfigLoader({ baseDir = __dirname, envPath } = {}) {
       envPath: file.filePath,
       values,
       workspaceRoot,
+      workspaceScope,
       workspaceConfigPath,
       workspaceRoots: workspaceScope.roots,
       workspaceNames: workspaceScope.names,

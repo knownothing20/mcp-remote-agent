@@ -3,7 +3,7 @@ const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
-const { resolveWorkspacePath } = require("./path-guard.cjs");
+const { createWorkspacePathGuard } = require("./path-guard.cjs");
 const { terminateProcessTree } = require("./process-utils.cjs");
 
 function integer(value, fallback, min, max) {
@@ -22,6 +22,7 @@ function executionError(message, code, statusCode = 500, extra = {}) {
 
 function createExecService({
   workspaceRoot,
+  workspaceScope,
   policy,
   queue,
   defaultTimeoutMs = 120_000,
@@ -32,10 +33,10 @@ function createExecService({
   if (!workspaceRoot) throw new TypeError("workspaceRoot is required");
   if (!policy) throw new TypeError("policy is required");
   if (!queue) throw new TypeError("queue is required");
+  const pathGuard = createWorkspacePathGuard(workspaceScope || { workspaceRoot });
 
   async function resolveCwd(input) {
-    if (!input) return (await resolveWorkspacePath(workspaceRoot, ".", { mustExist: true })).realPath;
-    return (await resolveWorkspacePath(workspaceRoot, input, { mustExist: true })).realPath;
+    return (await pathGuard.resolve(input || ".", { mustExist: true })).realPath;
   }
 
   function timeoutValue(value) {

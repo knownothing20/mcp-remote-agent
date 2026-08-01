@@ -1,5 +1,5 @@
 const fs = require("node:fs/promises");
-const { resolveWorkspacePath, workspaceResultPath } = require("./path-guard.cjs");
+const { createWorkspacePathGuard, workspaceResultPath } = require("./path-guard.cjs");
 const { atomicWriteFile, sha256 } = require("./atomic-write.cjs");
 const { createKeyLock } = require("./key-lock.cjs");
 
@@ -21,8 +21,9 @@ function conflict(message, currentEtag = null) {
   return error;
 }
 
-function createFileWriteService({ workspaceRoot } = {}) {
+function createFileWriteService({ workspaceRoot, workspaceScope } = {}) {
   if (!workspaceRoot) throw new TypeError("workspaceRoot is required");
+  const pathGuard = createWorkspacePathGuard(workspaceScope || { workspaceRoot });
   const locks = createKeyLock();
 
   async function writeText(inputPath, content, options = {}) {
@@ -32,7 +33,7 @@ function createFileWriteService({ workspaceRoot } = {}) {
       throw error;
     }
 
-    const resolved = await resolveWorkspacePath(workspaceRoot, inputPath, { mustExist: false });
+    const resolved = await pathGuard.resolve(inputPath, { mustExist: false });
     return locks.withLock(resolved.path, async () => {
       const currentEtag = await readCurrentEtag(resolved.path);
       const expectedEtag = String(options.expectedEtag || "").trim();
@@ -80,7 +81,7 @@ function createFileWriteService({ workspaceRoot } = {}) {
   }
 
   async function removeFile(inputPath, options = {}) {
-    const resolved = await resolveWorkspacePath(workspaceRoot, inputPath, { mustExist: true });
+    const resolved = await pathGuard.resolve(inputPath, { mustExist: true });
     return locks.withLock(resolved.realPath, async () => {
       const value = await fs.lstat(resolved.realPath);
       if (!value.isFile()) {

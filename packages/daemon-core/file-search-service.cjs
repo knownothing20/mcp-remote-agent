@@ -1,6 +1,6 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
-const { resolveWorkspacePath, workspaceResultPath } = require("./path-guard.cjs");
+const { createWorkspacePathGuard, workspaceResultPath } = require("./path-guard.cjs");
 
 const DEFAULT_EXCLUDE_DIRS = Object.freeze([
   "node_modules", ".git", "dist", "build", ".next", ".nuxt",
@@ -86,11 +86,12 @@ function matchesAny(relativePath, matchers) {
   return matchers.some((matcher) => matcher.test(relativePath));
 }
 
-function createFileSearchService({ workspaceRoot } = {}) {
+function createFileSearchService({ workspaceRoot, workspaceScope } = {}) {
   if (!workspaceRoot) throw new TypeError("workspaceRoot is required");
+  const pathGuard = createWorkspacePathGuard(workspaceScope || { workspaceRoot });
 
   async function walk(options = {}, visitor) {
-    const resolved = await resolveWorkspacePath(workspaceRoot, options.cwd || ".", { mustExist: true });
+    const resolved = await pathGuard.resolve(options.cwd || ".", { mustExist: true });
     const rootStat = await fs.stat(resolved.realPath);
     if (!rootStat.isDirectory()) {
       const error = new Error("Search cwd must be a directory");

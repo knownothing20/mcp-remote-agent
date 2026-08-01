@@ -4,12 +4,11 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 const {
-  clearWorkspaceRoots,
-  configureWorkspaceRoots,
+  createWorkspacePathGuard,
   isWithin,
   parseNamedInput,
-  resolveWorkspacePath,
 } = require("./packages/daemon-core/path-guard.cjs");
 const {
   createDaemonConfigLoader,
@@ -19,9 +18,36 @@ const {
 const { createFileReadService } = require("./packages/daemon-core/file-read-service.cjs");
 const { createFileSearchService } = require("./packages/daemon-core/file-search-service.cjs");
 const { createFileWriteService } = require("./packages/daemon-core/file-write-service.cjs");
+const { createCommandPolicy } = require("./packages/daemon-core/command-policy.cjs");
+const { createExecutionQueue } = require("./packages/daemon-core/execution-queue.cjs");
+const { createExecService } = require("./packages/daemon-core/exec-service.cjs");
+const { createJobService } = require("./packages/daemon-core/job-service.cjs");
+const { createDevelopmentSessionService } = require("./packages/daemon-core/development-session-service.cjs");
 
 async function rejectsCode(fn, code) {
   await assert.rejects(fn, (error) => error?.code === code);
+}
+
+function shellArg(value) {
+  const text = String(value);
+  if (process.platform === "win32") return `"${text.replace(/"/g, '""')}"`;
+  return `'${text.replace(/'/g, `'"'"'`)}'`;
+}
+
+function git(cwd, args) {
+  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+  if (result.status !== 0) throw new Error(result.stderr || result.stdout);
+  return result.stdout.trim();
+}
+
+async function waitFor(fn, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const value = await fn();
+    if (value) return value;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("Timed out waiting for named-workspace operation");
 }
 
 async function main() {
@@ -39,10 +65,11 @@ async function main() {
   await fs.writeFile(path.join(outside, "secret.txt"), "secret\n");
 
   try {
-    const scope = configureWorkspaceRoots({
+    const pathGuard = createWorkspacePathGuard({
       defaultWorkspace: "projects",
       roots: { projects, openclaw },
     });
+    const { scope } = pathGuard;
     assert.equal(scope.defaultRoot, path.resolve(projects));
     assert.deepEqual(scope.names, ["projects", "openclaw"]);
 
@@ -55,26 +82,26 @@ async function main() {
       relativePath: "content-analyzer",
     });
 
-    const relative = await resolveWorkspacePath(projects, "content-analyzer/README.md", { mustExist: true });
+    const relative = await pathGuard.resolve("content-analyzer/README.md", { mustExist: true });
     assert.equal(relative.workspace, "projects");
     assert.equal(relative.isDefaultWorkspace, true);
     assert.equal(relative.namedPath, "projects:/content-analyzer/README.md");
 
-    const named = await resolveWorkspacePath(projects, "openclaw:/config.json", { mustExist: true });
+    const named = await pathGuard.resolve("openclaw:/config.json", { mustExist: true });
     assert.equal(named.workspace, "openclaw");
     assert.equal(named.isDefaultWorkspace, false);
     assert.equal(named.realPath, await fs.realpath(path.join(openclaw, "config.json")));
 
-    const uri = await resolveWorkspacePath(projects, "workspace://openclaw/workspace", { mustExist: true });
+    const uri = await pathGuard.resolve("workspace://openclaw/workspace", { mustExist: true });
     assert.equal(uri.workspace, "openclaw");
     assert.equal(uri.namedPath, "openclaw:/workspace");
 
-    const absolute = await resolveWorkspacePath(projects, path.join(openclaw, "config.json"), { mustExist: true });
+    const absolute = await pathGuard.resolve(path.join(openclaw, "config.json"), { mustExist: true });
     assert.equal(absolute.workspace, "openclaw");
 
-    const reader = createFileReadService({ workspaceRoot: projects });
-    const writer = createFileWriteService({ workspaceRoot: projects });
-    const search = createFileSearchService({ workspaceRoot: projects });
+    const reader = createFileReadService({ workspaceRoot: projects, workspaceScope: scope });
+    const writer = createFileWriteService({ workspaceRoot: projects, workspaceScope: scope });
+    const search = createFileSearchService({ workspaceRoot: projects, workspaceScope: scope });
 
     const defaultRead = await reader.readText("content-analyzer/README.md");
     assert.equal(defaultRead.workspace, "projects");
@@ -108,37 +135,121 @@ async function main() {
     const removed = await writer.removeFile("openclaw:/workspace/generated.txt", { expectedEtag: written.etag });
     assert.equal(removed.path, "openclaw:/workspace/generated.txt");
 
+    const alternateOpenclaw = path.join(base, ".openclaw-alternate");
+    await fs.mkdir(alternateOpenclaw, { recursive: true });
+    await fs.writeFile(path.join(alternateOpenclaw, "config.json"), "alternate\n");
+    const alternateGuard = createWorkspacePathGuard({
+      defaultWorkspace: "projects",
+      roots: { projects, openclaw: alternateOpenclaw },
+    });
+    const alternateReader = createFileReadService({ workspaceRoot: projects, workspaceScope: alternateGuard.scope });
+    assert.equal((await reader.readText("openclaw:/config.json")).content, "{}\n");
+    assert.equal((await alternateReader.readText("openclaw:/config.json")).content, "alternate\n");
+    assert.equal((await reader.readText("openclaw:/config.json")).content, "{}\n");
+
+    const policy = createCommandPolicy({ allowExec: true });
+    const queue = createExecutionQueue({ maxConcurrency: 1, queueTimeoutMs: 1_000 });
+    const exec = createExecService({
+      workspaceRoot: projects,
+      workspaceScope: scope,
+      policy,
+      queue,
+    });
+    const expectedNamedCwd = await fs.realpath(path.join(openclaw, "workspace"));
+    const execResult = await exec.executeScript("process.stdout.write(process.cwd())", {
+      interpreter: "node",
+      cwd: "openclaw:/workspace",
+    });
+    assert.equal(await fs.realpath(execResult.stdout), expectedNamedCwd);
+
+    const jobScript = path.join(openclaw, "workspace", "named-job.cjs");
+    await fs.writeFile(jobScript, "process.stdout.write(process.cwd())\n");
+    const jobs = createJobService({
+      jobsDir: path.join(base, ".jobs"),
+      workspaceRoot: projects,
+      workspaceScope: scope,
+      policy,
+      maxConcurrency: 1,
+      queueTimeoutMs: 1_000,
+      defaultTimeoutMs: 10_000,
+    });
+    const started = await jobs.start({
+      command: `${shellArg(process.execPath)} ${shellArg(jobScript)}`,
+      cwd: "openclaw:/workspace",
+      clientId: "named-workspace-test",
+    });
+    const completed = await waitFor(async () => {
+      const job = await jobs.get(started.job.id);
+      return job.status === "completed" && job.processAlive === false ? job : null;
+    });
+    assert.equal(completed.cwd, expectedNamedCwd);
+    const jobLogs = await jobs.logs(completed.id, { tailBytes: 4096 });
+    assert.equal(await fs.realpath(jobLogs.stdout.content), expectedNamedCwd);
+    await jobs.remove(completed.id);
+
+    const repo = path.join(openclaw, "workspace", "session-repo");
+    await fs.mkdir(repo, { recursive: true });
+    git(repo, ["init", "-b", "main"]);
+    git(repo, ["config", "user.name", "AgentPort Test"]);
+    git(repo, ["config", "user.email", "agentport@example.com"]);
+    await fs.writeFile(path.join(repo, "README.md"), "base\n");
+    git(repo, ["add", "README.md"]);
+    git(repo, ["commit", "-m", "base"]);
+    const sessions = createDevelopmentSessionService({
+      workspaceRoot: projects,
+      workspaceScope: scope,
+      sessionsDir: path.join(base, ".sessions"),
+      worktreesDir: path.join(base, ".worktrees"),
+      defaultLeaseMs: 60_000,
+    });
+    const session = await sessions.create({
+      projectRoot: "openclaw:/workspace/session-repo",
+      projectName: "named-workspace-repo",
+      agentId: "test-agent",
+      baseRef: "main",
+      targetBranch: "main",
+    });
+    assert.equal(session.repoRoot, await fs.realpath(repo));
+    assert.equal(session.status, "active");
+    const cleaned = await sessions.cleanup(session.id, {
+      force: true,
+      deleteBranch: true,
+      confirm: session.id,
+    });
+    assert.equal(cleaned.cleaned, true);
+    assert.equal(cleaned.branchDeleted, true);
+
     await rejectsCode(
-      () => resolveWorkspacePath(projects, "missing:/file.txt", { mustExist: false }),
+      () => pathGuard.resolve("missing:/file.txt", { mustExist: false }),
       "EWORKSPACE_NAME",
     );
     await rejectsCode(
-      () => resolveWorkspacePath(projects, "openclaw:/../outside/secret.txt", { mustExist: true }),
+      () => pathGuard.resolve("openclaw:/../outside/secret.txt", { mustExist: true }),
       "EWORKSPACE",
     );
     await rejectsCode(
-      () => resolveWorkspacePath(projects, path.join(outside, "secret.txt"), { mustExist: true }),
+      () => pathGuard.resolve(path.join(outside, "secret.txt"), { mustExist: true }),
       "EWORKSPACE",
     );
 
     if (process.platform !== "win32") {
       await fs.symlink(outside, path.join(projects, "escape"), "dir");
       await rejectsCode(
-        () => resolveWorkspacePath(projects, "projects:/escape/secret.txt", { mustExist: true }),
+        () => pathGuard.resolve("projects:/escape/secret.txt", { mustExist: true }),
         "EWORKSPACE",
       );
 
       await fs.symlink(openclaw, path.join(projects, "other-workspace"), "dir");
       await rejectsCode(
-        () => resolveWorkspacePath(projects, "projects:/other-workspace/config.json", { mustExist: true }),
+        () => pathGuard.resolve("projects:/other-workspace/config.json", { mustExist: true }),
         "EWORKSPACE",
       );
     }
 
     // Development-session compatibility: the exported boundary check treats
     // the configured default root as the complete named-workspace scope.
-    assert.equal(isWithin(path.join(openclaw, "workspace"), projects), true);
-    assert.equal(isWithin(path.join(outside, "secret.txt"), projects), false);
+    assert.equal(isWithin(path.join(openclaw, "workspace"), projects, scope), true);
+    assert.equal(isWithin(path.join(outside, "secret.txt"), projects, scope), false);
 
     const parsedMap = parseWorkspaceRootsJson(JSON.stringify({ projects, openclaw }));
     assert.deepEqual(parsedMap, { roots: { projects, openclaw }, defaultWorkspace: "" });
@@ -228,7 +339,6 @@ async function main() {
 
     console.log("named workspace tests passed");
   } finally {
-    clearWorkspaceRoots();
     await fs.rm(base, { recursive: true, force: true });
   }
 }

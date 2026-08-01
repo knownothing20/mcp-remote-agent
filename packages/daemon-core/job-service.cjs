@@ -2,7 +2,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
-const { resolveWorkspacePath } = require("./path-guard.cjs");
+const { createWorkspacePathGuard } = require("./path-guard.cjs");
 const { createJobId, createJobStore, nowIso } = require("./job-store.cjs");
 const { createKeyLock } = require("./key-lock.cjs");
 const { pidAlive, terminateProcessTree } = require("./process-utils.cjs");
@@ -92,6 +92,7 @@ async function readTail(filePath, maxBytes) {
 function createJobService({
   jobsDir,
   workspaceRoot,
+  workspaceScope,
   policy,
   workerPath = path.join(__dirname, "job-worker.cjs"),
   maxConcurrency = 2,
@@ -103,6 +104,7 @@ function createJobService({
   if (!jobsDir) throw new TypeError("jobsDir is required");
   if (!workspaceRoot) throw new TypeError("workspaceRoot is required");
   if (!policy) throw new TypeError("policy is required");
+  const pathGuard = createWorkspacePathGuard(workspaceScope || { workspaceRoot });
   const store = createJobStore({ jobsDir });
   const startLock = createKeyLock();
   const maxJobs = intValue(maxConcurrency, 2, 1, 64);
@@ -112,7 +114,7 @@ function createJobService({
   const defaultChunk = intValue(logChunkBytes, 64 * 1024, 1024, 5 * 1024 * 1024);
 
   async function resolveCwd(input) {
-    return (await resolveWorkspacePath(workspaceRoot, input || ".", { mustExist: true })).realPath;
+    return (await pathGuard.resolve(input || ".", { mustExist: true })).realPath;
   }
 
   function timeoutValue(value) {
