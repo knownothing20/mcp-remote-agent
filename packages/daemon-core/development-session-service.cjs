@@ -3,7 +3,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const { atomicWriteFile } = require('./atomic-write.cjs');
-const { resolveWorkspacePath, isWithin } = require('./path-guard.cjs');
+const { createWorkspacePathGuard, isWithin } = require('./path-guard.cjs');
 const { pidAlive, terminateProcessTree } = require('./process-utils.cjs');
 const { createProjectLockManager } = require('./project-lock.cjs');
 
@@ -88,6 +88,7 @@ async function run(command, args, { cwd, timeoutMs = 60_000, maxBytes = 4 * 1024
 
 function createDevelopmentSessionService({
   workspaceRoot,
+  workspaceScope,
   sessionsDir,
   worktreesDir,
   defaultLeaseMs = 30 * 60 * 1000,
@@ -97,7 +98,8 @@ function createDevelopmentSessionService({
   maxDiffBytes = 2 * 1024 * 1024,
 } = {}) {
   if (!workspaceRoot) throw new TypeError('workspaceRoot is required');
-  const root = path.resolve(workspaceRoot);
+  const pathGuard = createWorkspacePathGuard(workspaceScope || { workspaceRoot });
+  const root = pathGuard.defaultRoot;
   const sessionRoot = path.resolve(sessionsDir || path.join(root, '.agentport-sessions'));
   const worktreeRoot = path.resolve(worktreesDir || path.join(root, '.agentport-worktrees'));
   const locksDir = path.join(sessionRoot, '.locks');
@@ -124,11 +126,11 @@ function createDevelopmentSessionService({
   }
   async function git(cwd, args, options = {}) { return run('git', args, { cwd, timeoutMs: options.timeoutMs || gitTimeoutMs, maxBytes: options.maxBytes || 4 * 1024 * 1024, allowCodes: options.allowCodes || [0], env: options.env }); }
   async function resolveRepository(projectRoot) {
-    const resolved = await resolveWorkspacePath(root, projectRoot, { mustExist: true });
+    const resolved = await pathGuard.resolve(projectRoot, { mustExist: true });
     const top = (await git(resolved.realPath, ['rev-parse', '--show-toplevel'])).stdout.trim();
     const repoReal = await fs.realpath(top);
     const rootReal = await fs.realpath(root);
-    if (!isWithin(repoReal, rootReal)) throw errorWith(`Git repository '${repoReal}' is outside workspace root`, 'EWORKSPACE', 403);
+    if (!pathGuard.isWithin(repoReal, rootReal)) throw errorWith(`Git repository '${repoReal}' is outside workspace roots`, 'EWORKSPACE', 403);
     return repoReal;
   }
   async function rulePaths(worktreePath, rules) {

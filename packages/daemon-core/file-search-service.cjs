@@ -1,6 +1,6 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
-const { resolveWorkspacePath } = require("./path-guard.cjs");
+const { createWorkspacePathGuard, workspaceResultPath } = require("./path-guard.cjs");
 
 const DEFAULT_EXCLUDE_DIRS = Object.freeze([
   "node_modules", ".git", "dist", "build", ".next", ".nuxt",
@@ -86,11 +86,12 @@ function matchesAny(relativePath, matchers) {
   return matchers.some((matcher) => matcher.test(relativePath));
 }
 
-function createFileSearchService({ workspaceRoot } = {}) {
+function createFileSearchService({ workspaceRoot, workspaceScope } = {}) {
   if (!workspaceRoot) throw new TypeError("workspaceRoot is required");
+  const pathGuard = createWorkspacePathGuard(workspaceScope || { workspaceRoot });
 
   async function walk(options = {}, visitor) {
-    const resolved = await resolveWorkspacePath(workspaceRoot, options.cwd || ".", { mustExist: true });
+    const resolved = await pathGuard.resolve(options.cwd || ".", { mustExist: true });
     const rootStat = await fs.stat(resolved.realPath);
     if (!rootStat.isDirectory()) {
       const error = new Error("Search cwd must be a directory");
@@ -120,14 +121,15 @@ function createFileSearchService({ workspaceRoot } = {}) {
 
         const absolute = path.join(current.absolute, child.name);
         const relativeToCwd = path.relative(resolved.realPath, absolute).replace(/\\/g, "/");
-        const relativeToWorkspace = path.relative(resolved.root, absolute).replace(/\\/g, "/");
+        const resultPath = workspaceResultPath(resolved, absolute);
         visited += 1;
 
         if (child.isSymbolicLink()) {
           await visitor({
             absolute,
             relativeToCwd,
-            relativeToWorkspace,
+            relativeToWorkspace: resultPath.relativePath,
+            ...resultPath,
             type: "symlink",
             skipped: true,
             stat: null,
@@ -140,7 +142,8 @@ function createFileSearchService({ workspaceRoot } = {}) {
         const shouldContinue = await visitor({
           absolute,
           relativeToCwd,
-          relativeToWorkspace,
+          relativeToWorkspace: resultPath.relativePath,
+          ...resultPath,
           type,
           skipped: false,
           stat,
@@ -168,7 +171,10 @@ function createFileSearchService({ workspaceRoot } = {}) {
       if (!matchesAny(entry.relativeToCwd, matchers)) return true;
       if (excludeMatchers.length && matchesAny(entry.relativeToCwd, excludeMatchers)) return true;
       entries.push({
-        path: entry.relativeToWorkspace,
+        workspace: entry.workspace,
+        path: entry.path,
+        relativePath: entry.relativePath,
+        namedPath: entry.namedPath,
         type: entry.type,
         size: entry.stat.size,
         mtimeMs: entry.stat.mtimeMs,
@@ -176,11 +182,15 @@ function createFileSearchService({ workspaceRoot } = {}) {
       return entries.length < maxResults;
     });
 
+    const cwdFields = workspaceResultPath(summary.resolved);
     return {
       success: true,
       engine: "agentport-core",
       pattern: pattern || options.pattern || "**/*",
-      cwd: path.relative(summary.resolved.root, summary.resolved.realPath).replace(/\\/g, "/") || ".",
+      workspace: summary.resolved.workspace,
+      cwd: cwdFields.path,
+      relativeCwd: cwdFields.relativePath,
+      namedCwd: cwdFields.namedPath,
       entries,
       files: entries.map((entry) => entry.path),
       count: entries.length,
@@ -244,17 +254,28 @@ function createFileSearchService({ workspaceRoot } = {}) {
       const lines = content.split(/\r?\n/);
       for (let i = 0; i < lines.length; i += 1) {
         if (!matcher(lines[i])) continue;
-        matches.push({ path: entry.relativeToWorkspace, line: i + 1, text: lines[i] });
+        matches.push({
+          workspace: entry.workspace,
+          path: entry.path,
+          relativePath: entry.relativePath,
+          namedPath: entry.namedPath,
+          line: i + 1,
+          text: lines[i],
+        });
         if (matches.length >= maxResults) return false;
       }
       return true;
     });
 
+    const cwdFields = workspaceResultPath(summary.resolved);
     return {
       success: true,
       engine: "agentport-core",
       pattern,
-      cwd: path.relative(summary.resolved.root, summary.resolved.realPath).replace(/\\/g, "/") || ".",
+      workspace: summary.resolved.workspace,
+      cwd: cwdFields.path,
+      relativeCwd: cwdFields.relativePath,
+      namedCwd: cwdFields.namedPath,
       include: stringList(options.include, ["**/*"]),
       excludeDirs: summary.excludeDirs,
       maxResults,

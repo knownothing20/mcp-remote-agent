@@ -18,6 +18,8 @@ WHITEPAPER.md
 # Generated
 server/.env
 daemon/.env
+server/workspaces.json
+daemon/workspaces.json
 
 # Dependencies
 node_modules/

@@ -1,7 +1,7 @@
 const fsSync = require("node:fs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
-const { resolveWorkspacePath } = require("./path-guard.cjs");
+const { createWorkspacePathGuard, workspaceResultPath } = require("./path-guard.cjs");
 const { sha256 } = require("./atomic-write.cjs");
 
 function positiveInt(value, fallback, min = 1, max = Number.MAX_SAFE_INTEGER) {
@@ -140,14 +140,15 @@ async function readLineRangeWithHash(filePath, startLine, requestedEndLine, opti
   };
 }
 
-function createFileReadService({ workspaceRoot, defaultMaxBytes = 2 * 1024 * 1024 } = {}) {
+function createFileReadService({ workspaceRoot, workspaceScope, defaultMaxBytes = 2 * 1024 * 1024 } = {}) {
   if (!workspaceRoot) throw new TypeError("workspaceRoot is required");
+  const pathGuard = createWorkspacePathGuard(workspaceScope || { workspaceRoot });
 
   async function stat(inputPath) {
-    const resolved = await resolveWorkspacePath(workspaceRoot, inputPath, { mustExist: true });
+    const resolved = await pathGuard.resolve(inputPath, { mustExist: true });
     const value = await fs.stat(resolved.realPath);
     return {
-      path: path.relative(resolved.root, resolved.realPath).replace(/\\/g, "/") || ".",
+      ...workspaceResultPath(resolved),
       size: value.size,
       mtimeMs: value.mtimeMs,
       mode: value.mode,
@@ -157,7 +158,7 @@ function createFileReadService({ workspaceRoot, defaultMaxBytes = 2 * 1024 * 102
   }
 
   async function readText(inputPath, options = {}) {
-    const resolved = await resolveWorkspacePath(workspaceRoot, inputPath, { mustExist: true });
+    const resolved = await pathGuard.resolve(inputPath, { mustExist: true });
     const value = await fs.stat(resolved.realPath);
     if (!value.isFile()) {
       const error = new Error("Target is not a file");
@@ -184,7 +185,7 @@ function createFileReadService({ workspaceRoot, defaultMaxBytes = 2 * 1024 * 102
         etag: metadataEtag(value),
       });
       return {
-        path: path.relative(resolved.root, resolved.realPath).replace(/\\/g, "/"),
+        ...workspaceResultPath(resolved),
         ...ranged,
         size: value.size,
         ranged: true,
@@ -195,7 +196,7 @@ function createFileReadService({ workspaceRoot, defaultMaxBytes = 2 * 1024 * 102
     const fullContent = await fs.readFile(resolved.realPath, "utf8");
     const lines = fullContent.split(/\r?\n/);
     return {
-      path: path.relative(resolved.root, resolved.realPath).replace(/\\/g, "/"),
+      ...workspaceResultPath(resolved),
       content: fullContent,
       etag: sha256(Buffer.from(fullContent, "utf8")),
       etagKind: "content",
@@ -211,7 +212,7 @@ function createFileReadService({ workspaceRoot, defaultMaxBytes = 2 * 1024 * 102
   }
 
   async function readBytes(inputPath, options = {}) {
-    const resolved = await resolveWorkspacePath(workspaceRoot, inputPath, { mustExist: true });
+    const resolved = await pathGuard.resolve(inputPath, { mustExist: true });
     const value = await fs.stat(resolved.realPath);
     if (!value.isFile()) {
       const error = new Error("Target is not a file");
@@ -219,11 +220,12 @@ function createFileReadService({ workspaceRoot, defaultMaxBytes = 2 * 1024 * 102
       throw error;
     }
 
+    const fields = workspaceResultPath(resolved);
     const offset = positiveInt(options.offset, 0, 0, value.size);
     const remaining = Math.max(0, value.size - offset);
     if (remaining === 0) {
       return {
-        path: path.relative(resolved.root, resolved.realPath).replace(/\\/g, "/"),
+        ...fields,
         offset,
         bytesRead: 0,
         size: value.size,
@@ -236,7 +238,7 @@ function createFileReadService({ workspaceRoot, defaultMaxBytes = 2 * 1024 * 102
       const buffer = Buffer.alloc(Math.min(length, remaining));
       const result = await handle.read(buffer, 0, buffer.length, offset);
       return {
-        path: path.relative(resolved.root, resolved.realPath).replace(/\\/g, "/"),
+        ...fields,
         offset,
         bytesRead: result.bytesRead,
         size: value.size,
@@ -248,7 +250,7 @@ function createFileReadService({ workspaceRoot, defaultMaxBytes = 2 * 1024 * 102
   }
 
   async function manifest(inputPath = ".", options = {}) {
-    const root = await resolveWorkspacePath(workspaceRoot, inputPath, { mustExist: true });
+    const root = await pathGuard.resolve(inputPath, { mustExist: true });
     const rootStat = await fs.stat(root.realPath);
     if (!rootStat.isDirectory()) {
       const error = new Error("Manifest target must be a directory");
@@ -274,14 +276,14 @@ function createFileReadService({ workspaceRoot, defaultMaxBytes = 2 * 1024 * 102
           break;
         }
         const absolute = path.join(current.absolute, child.name);
-        const relative = path.relative(root.root, absolute).replace(/\\/g, "/");
+        const fields = workspaceResultPath(root, absolute);
         if (child.isSymbolicLink()) {
-          entries.push({ path: relative, type: "symlink", skipped: true });
+          entries.push({ ...fields, type: "symlink", skipped: true });
           continue;
         }
         const childStat = await fs.stat(absolute);
         entries.push({
-          path: relative,
+          ...fields,
           type: child.isDirectory() ? "directory" : "file",
           size: childStat.size,
           mtimeMs: childStat.mtimeMs,
@@ -292,8 +294,12 @@ function createFileReadService({ workspaceRoot, defaultMaxBytes = 2 * 1024 * 102
       }
     }
 
+    const rootFields = workspaceResultPath(root);
     return {
-      root: path.relative(root.root, root.realPath).replace(/\\/g, "/") || ".",
+      workspace: root.workspace,
+      root: rootFields.path,
+      rootRelativePath: rootFields.relativePath,
+      rootNamedPath: rootFields.namedPath,
       entries,
       count: entries.length,
       truncated,
