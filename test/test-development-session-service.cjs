@@ -3,7 +3,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { createDevelopmentSessionService } = require('./packages/daemon-core/development-session-service.cjs');
+const { createDevelopmentSessionService } = require('../packages/daemon-core/development-session-service.cjs');
 
 function git(cwd, args) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });

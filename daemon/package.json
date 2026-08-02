@@ -4,6 +4,6 @@
   "main": "server-entry.cjs",
   "scripts": {
     "start": "node server-entry.cjs",
-    "test": "node ../test-daemon-gateway.cjs"
+    "test": "node ../test/test-daemon-gateway.cjs"
   }
 }

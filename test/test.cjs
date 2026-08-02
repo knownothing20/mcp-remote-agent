@@ -4,11 +4,11 @@
  *
  * Usage:
  *   cd <skillDir>
- *   node test.cjs                            # Full test (local + remote)
- *   node test.cjs --local-only               # Local checks only
- *   node test.cjs --preflight --mode=auto    # 环境/依赖/连通预检
- *   node test.cjs --probe --mode=auto        # 模式探测（native-mcp / executable-skill）
- *   node test.cjs --verbose                  # Show detailed output
+ *   node test/test.cjs                            # Full test (local + remote)
+ *   node test/test.cjs --local-only               # Local checks only
+ *   node test/test.cjs --preflight --mode=auto    # 环境/依赖/连通预检
+ *   node test/test.cjs --probe --mode=auto        # 模式探测（native-mcp / executable-skill）
+ *   node test/test.cjs --verbose                  # Show detailed output
  *
  * Exit codes: 0=pass, 1=fail, 2=fatal
  */
@@ -37,7 +37,7 @@ function fail(name, reason) { results.fail++; failures.push({ name, reason }); c
 function skip(name, reason) { results.skip++; console.log(`  ${C.yellow}⊘${C.reset} ${name}${reason ? ` ${C.dim}(${reason})${C.reset}` : ""}`); }
 function section(title) { console.log(`\n${C.bold}${C.cyan}${title}${C.reset}\n${C.dim}${"─".repeat(50)}${C.reset}`); }
 
-const SKILL_DIR = __dirname;
+const SKILL_DIR = path.resolve(__dirname, "..");
 const LOCAL_DIR = path.join(SKILL_DIR, "local");
 const PRIMARY_MAIN_CONFIG_PATH = path.join(LOCAL_DIR, "agentport.json");
 function resolveMainConfigPath() {
@@ -313,13 +313,13 @@ async function localTests() {
       : fail("logger.js: missing size-based log rotation");
   } catch (e) { fail("logger.js read error", e.message); }
 
-  // Version — read from local config (single source of truth, with legacy fallback)
+  // Release metadata is tracked in package.json. Local config is machine-specific.
   const cfgPath = MAIN_CONFIG_PATH;
   try {
-    const config = JSON.parse(fs.readFileSync(cfgPath, "utf-8").replace(/^\uFEFF/, ""));
-    const expectedVersion = config.version || "?";
     const pkg = JSON.parse(fs.readFileSync(path.join(SKILL_DIR, "package.json"), "utf-8"));
-    pkg.version === expectedVersion ? pass(`version: ${pkg.version}`) : fail(`version mismatch`, `${pkg.version} != ${expectedVersion}`);
+    typeof pkg.version === "string" && pkg.version.trim()
+      ? pass(`version: ${pkg.version}`)
+      : fail("package.json version missing");
   } catch (e) { fail("package.json error", e.message); }
 
   // Config
@@ -611,11 +611,12 @@ async function main() {
   let pkgName = "agentport", pkgVersion = "?";
   let config = null;
   try {
-    config = readJsonSafe(MAIN_CONFIG_PATH);
-    if (config) {
-      pkgName = config.name || pkgName;
-      pkgVersion = config.version || pkgVersion;
+    const pkg = readJsonSafe(path.join(SKILL_DIR, "package.json"));
+    if (pkg) {
+      pkgName = pkg.name || pkgName;
+      pkgVersion = pkg.version || pkgVersion;
     }
+    config = readJsonSafe(MAIN_CONFIG_PATH);
   } catch (_) {}
   
   const rm = loadRuntimeMode();

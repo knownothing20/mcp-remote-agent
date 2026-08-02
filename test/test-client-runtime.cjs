@@ -5,6 +5,8 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 
+const ROOT = path.resolve(__dirname, "..");
+
 function listen(server) {
   return new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -91,8 +93,8 @@ async function main() {
     }, null, 2));
 
     process.env.AGENTPORT_CLIENT_STATE_PATH = statePath;
-    const { loadConnectionRegistry } = await import("./packages/client-core/connection-registry.js");
-    const { createClientRuntime, clientRuntimeInternals } = await import("./packages/client-core/client-runtime.js");
+    const { loadConnectionRegistry } = await import("../packages/client-core/connection-registry.js");
+    const { createClientRuntime, clientRuntimeInternals } = await import("../packages/client-core/client-runtime.js");
 
     const tokenA = clientRuntimeInternals.stableScriptToken({ idempotencyKey: "key-1", content: "echo one", interpreter: "bash", cwd: "/srv/projects/demo" });
     const tokenA2 = clientRuntimeInternals.stableScriptToken({ idempotencyKey: "key-1", content: "echo one", interpreter: "bash", cwd: "/srv/projects/demo" });
@@ -139,12 +141,12 @@ async function main() {
     }
 
     const cli = spawnSync(process.execPath, [
-      path.join(__dirname, "client", "cli-entry.js"),
+      path.join(ROOT, "client", "cli-entry.js"),
       "server", "list", "--json",
       "--connections", connectionsPath,
       "--projects", projectsPath,
     ], {
-      cwd: __dirname,
+      cwd: ROOT,
       encoding: "utf8",
       env: { ...process.env, AGENTPORT_CLIENT_STATE_PATH: statePath },
       timeout: 15_000,

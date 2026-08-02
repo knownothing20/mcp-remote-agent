@@ -9,20 +9,20 @@ const {
   createWorkspacePathGuard,
   isWithin,
   parseNamedInput,
-} = require("./packages/daemon-core/path-guard.cjs");
+} = require("../packages/daemon-core/path-guard.cjs");
 const {
   createDaemonConfigLoader,
   loadWorkspaceScope,
   parseWorkspaceRootsJson,
-} = require("./daemon/config-loader.cjs");
-const { createFileReadService } = require("./packages/daemon-core/file-read-service.cjs");
-const { createFileSearchService } = require("./packages/daemon-core/file-search-service.cjs");
-const { createFileWriteService } = require("./packages/daemon-core/file-write-service.cjs");
-const { createCommandPolicy } = require("./packages/daemon-core/command-policy.cjs");
-const { createExecutionQueue } = require("./packages/daemon-core/execution-queue.cjs");
-const { createExecService } = require("./packages/daemon-core/exec-service.cjs");
-const { createJobService } = require("./packages/daemon-core/job-service.cjs");
-const { createDevelopmentSessionService } = require("./packages/daemon-core/development-session-service.cjs");
+} = require("../daemon/config-loader.cjs");
+const { createFileReadService } = require("../packages/daemon-core/file-read-service.cjs");
+const { createFileSearchService } = require("../packages/daemon-core/file-search-service.cjs");
+const { createFileWriteService } = require("../packages/daemon-core/file-write-service.cjs");
+const { createCommandPolicy } = require("../packages/daemon-core/command-policy.cjs");
+const { createExecutionQueue } = require("../packages/daemon-core/execution-queue.cjs");
+const { createExecService } = require("../packages/daemon-core/exec-service.cjs");
+const { createJobService } = require("../packages/daemon-core/job-service.cjs");
+const { createDevelopmentSessionService } = require("../packages/daemon-core/development-session-service.cjs");
 
 async function rejectsCode(fn, code) {
   await assert.rejects(fn, (error) => error?.code === code);
@@ -322,7 +322,7 @@ async function main() {
       (error) => error?.code === "EWORKSPACE_CONFIG" && /overlaps/.test(error.message),
     );
 
-    const { validateProjectProfile, resolveProjectPath } = await import("./packages/client-core/project-profile.js");
+    const { validateProjectProfile, resolveProjectPath } = await import("../packages/client-core/project-profile.js");
     const namedProfile = validateProjectProfile("content-analyzer", {
       server: "debian-main",
       root: "workspace://projects/content-analyzer",

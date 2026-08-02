@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { createProjectLockManager } = require('./packages/daemon-core/project-lock.cjs');
+const { createProjectLockManager } = require('../packages/daemon-core/project-lock.cjs');
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function deferred() {

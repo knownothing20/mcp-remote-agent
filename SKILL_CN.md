@@ -90,7 +90,7 @@ AI Remote Development Gateway for MCP, CLI, SSH, and persistent daemon jobs
 | `SKILL.md` | 版本号 |
 | `<mcpConfigPath>` | MCP server 注册（变量替换，路径由 agentport.json 的 mcpConfigPath 决定） |
 | `server/.env` | 服务端运行配置（自动生成） |
-| `test.cjs` | 版本号 |
+| `test/test.cjs` | 安装后诊断与兼容测试入口 |
 
 ---
 
@@ -103,7 +103,7 @@ agentport/
 ├── package.json                    # 客户端依赖声明
 ├── agentport.example.json   # 配置模板（复制到 local/agentport.json 后修改）
 ├── sync.cjs                        # 变量同步脚本
-├── test.cjs                        # 安装后测试脚本
+├── test/                           # 安装后诊断与跨平台回归测试
 ├── local/                          # 本地配置（不上传 Git）
 │   ├── agentport.json       # ⭐ 唯一配置入口（从模板复制）
 │   ├── connections.json            # ⭐ 动态连接配置（可选）
@@ -660,10 +660,10 @@ nohup bash agentport-manager.sh >> boot.log 2>&1 &
 
 ```bash
 # 本地测试
-node test.cjs
+node test/test.cjs
 
 # 或仅本地检查（不需要远端在线）
-node test.cjs --local-only
+node test/test.cjs --local-only
 ```
 
 在 AI 对话中输入 `远程连接测试`，AI 会自动调用 `remote_health` 检查。
@@ -972,13 +972,13 @@ Dashboard 功能：
 cd <skillDir>    # 即 agentport.json 中 skillDir 的值
 
 # 完整测试（本地检查 + 远程连接测试）
-node test.cjs
+node test/test.cjs
 
 # 仅本地检查（不需要远端服务在线）
-node test.cjs --local-only
+node test/test.cjs --local-only
 
 # 显示详细输出
-node test.cjs --verbose
+node test/test.cjs --verbose
 ```
 
 ### 测试覆盖范围

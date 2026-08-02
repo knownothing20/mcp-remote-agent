@@ -9,7 +9,7 @@ const http = require("http");
 const os = require("os");
 const path = require("path");
 
-const ROOT = __dirname;
+const ROOT = path.resolve(__dirname, "..");
 const NODE = process.execPath;
 
 function wait(ms) {
@@ -63,7 +63,7 @@ class FakeSshClient extends EventEmitter {
 }
 
 async function testParentWatchdogUnit() {
-  const { startParentWatchdog } = await import("./cli-lifecycle.js");
+  const { startParentWatchdog } = await import("../cli-lifecycle.js");
   let exitCode = null;
   const error = new Error("missing");
   error.code = "ESRCH";
@@ -79,7 +79,7 @@ async function testParentWatchdogUnit() {
 }
 
 async function testForcedExitUnit() {
-  const { scheduleForcedExit } = await import("./cli-lifecycle.js");
+  const { scheduleForcedExit } = await import("../cli-lifecycle.js");
   let exitCode = null;
   scheduleForcedExit({ delayMs: 10, exitCode: 7, exit: (code) => { exitCode = code; } });
   await wait(40);
@@ -178,7 +178,7 @@ async function testHiddenLauncherParentCleanup() {
 }
 
 async function testSshExecTimeout() {
-  const { SSHClient } = await import("./ssh-client.js");
+  const { SSHClient } = await import("../ssh-client.js");
   const fake = new FakeSshClient();
   const ssh = new SSHClient({ host: "test", execTimeoutMs: 30 });
   ssh.connect = async () => {
@@ -193,7 +193,7 @@ async function testSshExecTimeout() {
 }
 
 async function testSshExecCompletesBeforeTimeout() {
-  const { SSHClient } = await import("./ssh-client.js");
+  const { SSHClient } = await import("../ssh-client.js");
   const fake = new FakeSshClient({ closeAfterMs: 10, stdout: "ok\n" });
   const ssh = new SSHClient({ host: "test", execTimeoutMs: 200 });
   ssh.connect = async () => {
@@ -206,7 +206,7 @@ async function testSshExecCompletesBeforeTimeout() {
 }
 
 async function testSshExecUsesRequestedCwd() {
-  const { SSHClient } = await import("./ssh-client.js");
+  const { SSHClient } = await import("../ssh-client.js");
   const fake = new FakeSshClient({ closeAfterMs: 10, stdout: "/workspace/project\n" });
   const ssh = new SSHClient({ host: "test", workspaceRoot: "/workspace", execTimeoutMs: 200 });
   ssh.connect = async () => {
@@ -220,7 +220,7 @@ async function testSshExecUsesRequestedCwd() {
 }
 
 async function testSshDoctorRipgrepProbeParsing() {
-  const { parseSshDoctorOutput } = await import("./doctor-utils.js");
+  const { parseSshDoctorOutput } = await import("../doctor-utils.js");
 
   assert.deepStrictEqual(
     parseSshDoctorOutput("agentport-rg=available\nuser@host:/workspace"),

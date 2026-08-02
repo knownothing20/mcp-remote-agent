@@ -4,7 +4,7 @@ const http = require("node:http");
 const {
   installDevelopmentResponseSanitizer,
   sanitizeDevelopmentPayload,
-} = require("./daemon/development-gateway-safe.cjs");
+} = require("../daemon/development-gateway-safe.cjs");
 
 function listen(server) {
   return new Promise((resolve, reject) => {

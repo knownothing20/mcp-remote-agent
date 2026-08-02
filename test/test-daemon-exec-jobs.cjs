@@ -4,7 +4,7 @@ const fs = require("node:fs/promises");
 const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
-const { createAgentPortGateway } = require("./daemon/modular-gateway.cjs");
+const { createAgentPortGateway } = require("../daemon/modular-gateway.cjs");
 
 const TERMINAL_JOB_STATUSES = new Set(["completed", "error", "timeout", "cancelled", "orphaned"]);
 

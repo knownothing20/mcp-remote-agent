@@ -20,6 +20,39 @@ Only the development gateway binds to the public LAN address. The modular and
 legacy services use dynamically selected `127.0.0.1` ports and remain private to
 the server.
 
+## Named workspace isolation
+
+The public daemon exposes only the workspace roots declared in its private
+environment and optional `workspaces.json`. Roots must be distinct and must not
+contain each other.
+
+```dotenv
+WORKSPACE_ROOT=/home/YOUR_USER/workspace
+DEFAULT_WORKSPACE=projects
+WORKSPACE_ROOTS_FILE=./workspaces.json
+```
+
+```json
+{
+  "default": "projects",
+  "roots": {
+    "projects": "/home/YOUR_USER/workspace",
+    "openclaw": "/home/YOUR_USER/.openclaw"
+  }
+}
+```
+
+`WORKSPACE_ROOTS_JSON` can provide the same object inline for managed
+environments. It takes precedence over `WORKSPACE_ROOTS_FILE`; when neither is
+present, the daemon remains compatible with the legacy single
+`WORKSPACE_ROOT` configuration.
+
+Clients may address a non-default root with `projects:/path`,
+`openclaw:/path`, or `workspace://openclaw/path`. Relative paths resolve only
+inside the default root. Path traversal, outside paths, overlapping roots, and
+symlink escapes are rejected before a file, command, Job, or Session operation
+is started.
+
 ## Routes owned by the modular gateway
 
 ### Files and search
@@ -164,7 +197,7 @@ JOB_MAX_CONCURRENCY=2
 JOB_DEFAULT_TIMEOUT_MS=1800000
 
 AGENTPORT_SESSIONS_DIR=/home/YOUR_USER/.agentport/sessions
-AGENTPORT_WORKTREES_DIR=/home/YOUR_USER/.openclaw/.agentport-worktrees
+AGENTPORT_WORKTREES_DIR=/home/YOUR_USER/workspace/.agentport-worktrees
 AGENTPORT_SESSION_LEASE_MS=1800000
 ```
 
@@ -173,9 +206,10 @@ See `.env.example` for the complete settings.
 ## Deployment compatibility
 
 Existing installations that copy only `server/` continue to run the legacy
-single-process daemon. They do not receive modular file/exec/Job or Worktree
-Session services until `daemon/`, `packages/daemon-core/`, and `server/` are
-deployed together and `daemon/server-entry.cjs` becomes the service entrypoint.
+single-process daemon. They do not receive modular file/exec/Job, named
+workspace, or Worktree Session services until `daemon/`,
+`packages/daemon-core/`, and `server/` are deployed together and
+`daemon/server-entry.cjs` becomes the service entrypoint.
 
 The modular Job service reuses the existing `JOBS_DIR` by default. Session and
 Worktree paths are separate and configurable.
@@ -188,12 +222,15 @@ npm run test:gateway
 npm run test:exec
 npm run test:jobs
 npm run test:sessions
+npm run test:workspaces
 npm run test:lifecycle
+npm run test:all
 ```
 
 Cross-platform tests cover the client runtime and synchronous execution on
-Windows and Linux. Linux additionally validates detached Workers, real Git
+Windows and Linux. They additionally validate detached Workers, real Git
 Worktrees, project locks, Diff, commit, merge, cleanup, Session Job attachment,
-and MCP Session tool calls.
+MCP Session tool calls, named workspace path resolution, traversal rejection,
+and symlink protection.
 
 See `docs/PHASE5_DEVELOPMENT_SESSIONS.md` for the full workflow and safety rules.

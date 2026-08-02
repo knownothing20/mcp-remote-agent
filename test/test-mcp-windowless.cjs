@@ -9,7 +9,8 @@ const REMOTE = process.argv.includes("--remote");
 const CONNECTION_ARG = process.argv.find((arg) => arg.startsWith("--connection="));
 const CONNECTION = CONNECTION_ARG ? CONNECTION_ARG.slice("--connection=".length) : "183-agentport-daemon";
 const LAUNCHER = path.join(process.env.USERPROFILE || "", ".codex", "bin", "hidden-stdio-launcher-v3.exe");
-const INDEX = path.join(__dirname, "index.js");
+const ROOT = path.resolve(__dirname, "..");
+const INDEX = path.join(ROOT, "index.js");
 
 function terminalCount() {
   if (process.platform !== "win32") return 0;
@@ -27,7 +28,7 @@ function wait(ms) {
 async function main() {
   const before = terminalCount();
   const child = spawn(LAUNCHER, [process.execPath, INDEX], {
-    cwd: __dirname,
+    cwd: ROOT,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,
   });

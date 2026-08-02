@@ -4,8 +4,8 @@ const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { createDevelopmentFrontServer } = require('./daemon/development-gateway.cjs');
-const { authorizeContext } = require('./daemon/auth-context.cjs');
+const { createDevelopmentFrontServer } = require('../daemon/development-gateway.cjs');
+const { authorizeContext } = require('../daemon/auth-context.cjs');
 
 function git(cwd, args) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });

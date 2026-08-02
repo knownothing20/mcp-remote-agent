@@ -3,6 +3,11 @@
 This directory holds private runtime configuration. Real tokens, passwords,
 private keys, runtime state, logs, and generated files are not committed.
 
+Each AI desktop application needs its own physical AgentPort directory or, at a
+minimum, its own private `local/` directory. Core source may be synchronized,
+but do not share `local/`, a selected connection, MCP process state, or a daemon
+token between applications.
+
 ## Fresh Install Order
 
 Start with SSH only:
@@ -54,6 +59,24 @@ Validate with an authenticated daemon command:
 node cli.js job list --connection daemon-main --route daemon --limit 1 --json
 ```
 
+## V3 client configuration
+
+The modular client uses separate files:
+
+```text
+connections.v3.json.example -> connections.v3.json
+projects.json.example       -> projects.json
+```
+
+`connections.v3.json` stores logical server identities and their LAN,
+virtual-LAN, and SSH recovery endpoints. Its `workspaceId` must match the
+identity advertised by the daemon. It is not a filesystem path.
+
+Named remote workspace paths are configured only on the daemon. Use values such
+as `projects:/app` or `openclaw:/software/app` in client commands after the
+daemon administrator has declared those roots. Never place remote workspace
+roots, tokens, or another application's credentials in a tracked example.
+
 ## MCP Registration
 
 If the AI tool supports native MCP, also create `local/agentport.json`:
@@ -84,7 +107,9 @@ Restart the AI tool after MCP config changes.
 local/
 |-- README.md
 |-- connections.json
+|-- connections.v3.json
 |-- agentport.json
+|-- projects.json
 `-- server/
     `-- .env
 ```
@@ -95,4 +120,6 @@ local/
   `local/server/.env`.
 - Do not copy another software's daemon `authToken` as the final setup.
 - Use one unique `clientId=token` for each machine/software pair.
+- Keep daemon `workspaces.json` and daemon `.env` on the remote server, outside
+  this client directory.
 - Report only masked tokens.

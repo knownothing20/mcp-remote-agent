@@ -1,13 +1,14 @@
-# agentport
+# AgentPort
 
-AI Remote Development Gateway for MCP, CLI, SSH, and persistent daemon jobs
+Version 3.1 remote development gateway for MCP, CLI, SSH recovery, durable Jobs,
+Git Worktree sessions, and named workspace isolation.
 
 Enable AI Agents to develop on remote Linux servers through the most stable
 available channel: native MCP tools, CLI fallback, daemon HTTP APIs, SSH
 recovery, and persistent remote jobs.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-2.5.0-blue)](https://github.com/knownothing20/agentport)
+[![Version](https://img.shields.io/badge/version-3.1.0-blue)](https://github.com/knownothing20/agentport)
 
 [中文文档](./README_CN.md)
 
@@ -25,23 +26,27 @@ when a desktop tool's native MCP transport is unavailable or unstable.
 
 ## Architecture Overview
 
-`agentport` is split into a local agent gateway and a remote Linux
-daemon:
+`AgentPort` has a local client side and a remote Linux daemon side. One daemon
+can serve many AI desktop applications; every application keeps its own local
+configuration and credential material.
 
 ```text
 AI desktop tool
-  -> CLI daemon gateway, native MCP tools, or SSH recovery
-  -> local agentport gateway
-  -> remote daemon HTTP API
-  -> remote Linux workspace
+  -> native MCP (short structured work) / CLI fallback / SSH recovery
+  -> local client runtime and private local/ configuration
+  -> public development gateway (default port 3183)
+       -> development-session API
+       -> modular file, search, exec, and Job services
+       -> loopback legacy dashboard and management compatibility service
+  -> explicitly configured remote workspace roots
 ```
 
-The local side registers MCP tools when available, provides a CLI fallback for
-tools that can run terminal commands, reads private connection config, and turns
-daemon errors into agent-readable messages. The remote daemon performs token
-auth, safe path checks, file operations, command execution, persistent
-development jobs, audit logging, health checks, Dashboard responses, and hot
-config reload.
+The local client registers MCP tools when available, provides a CLI fallback,
+reads only private connection configuration, and turns daemon errors into
+agent-readable messages. The remote daemon performs token authentication, path
+checks, file operations, command execution, durable Job control, Worktree
+sessions, audit logging, health checks, Dashboard responses, and configuration
+reload.
 
 For desktop tools that spawn multiple MCP stdio children per software, agentport
 now keeps one local "core" process per software key and lets other sessions
@@ -69,20 +74,58 @@ the project documentation in this repository.
 
 | Feature | Description |
 |---------|-------------|
-| Remote File R/W | `remote_read` / `remote_write` / `remote_stat` |
-| Remote Search | `remote_glob` search file paths, `remote_grep` search file contents |
-| Command Execution | `remote_bash` for simple commands, `remote_script` for multi-line scripts |
-| Batch Operations | `remote_batch` up to 20 operations per request |
-| Native MCP Tools | Structured `remote_*` tools when the host supports custom MCP servers |
-| CLI Daemon Gateway | `node cli.js status` and `node cli.js job ...` for stable development workflows |
-| Persistent Jobs | Remote daemon jobs for tests, builds, logs, status, and cancel |
-| Async Execution | `remote_exec_async` / `remote_script_async` + `remote_task` for long-running tasks |
-| Config Hot Reload | `remote_config` modify remote config without restart |
-| Execution Backpressure | Queue timeout returns clear 429 with exec running/max/queued state |
-| Dynamic Connections | Switch between multiple servers without restarting MCP |
-| Multi-session Reuse | One local core instance per software key, extra sessions attach via local proxy broker |
-| Health Check | Automatic remote service status detection |
-| Encoding Handling | Auto base64 encode special chars, clean CRLF/BOM |
+| Named Workspace Isolation | Multiple non-overlapping roots with traversal and symlink-escape protection |
+| Remote File R/W | `remote_read`, `remote_write`, and `remote_stat` return workspace-aware paths |
+| Remote Search | Bounded `remote_glob` and `remote_grep` searches inside an authorized workspace |
+| Command Execution | `remote_bash` for short commands and `remote_script` for short multi-line scripts |
+| Persistent Jobs | Detached Jobs for builds, tests, logs, follow-up, cancellation, and restart recovery |
+| Development Sessions | Per-task Git branches and Worktrees with diff, commit, merge, rollback, and cleanup guards |
+| Native MCP and CLI | Structured `remote_*` tools plus a stable CLI fallback and SSH recovery route |
+| Logical Servers | LAN, virtual-LAN, and SSH endpoints can share one server identity |
+| Execution Backpressure | Queue state, concurrency limits, timeouts, and process-tree cleanup |
+| Token and Audit Controls | Per-client tokens, redacted responses, audit logging, and optional Dashboard administration |
+
+---
+
+## Named Workspaces
+
+Version 3.1 can expose more than one remote root without granting the daemon
+access to the rest of the server. Each root has a stable name and roots must not
+overlap.
+
+```json
+{
+  "default": "projects",
+  "roots": {
+    "projects": "/home/YOUR_USER/workspace",
+    "openclaw": "/home/YOUR_USER/.openclaw"
+  }
+}
+```
+
+Save this as `workspaces.json` beside the daemon environment file, then set:
+
+```dotenv
+WORKSPACE_ROOT=/home/YOUR_USER/workspace
+DEFAULT_WORKSPACE=projects
+WORKSPACE_ROOTS_FILE=./workspaces.json
+```
+
+The daemon accepts all of these forms:
+
+| Input | Meaning |
+| --- | --- |
+| `projects:/app/README.md` | Explicit path inside the `projects` root |
+| `openclaw:/software/app` | Explicit path inside the `openclaw` root |
+| `workspace://openclaw/software/app` | URI form of the same named path |
+| `relative/path` | Path inside the default workspace only |
+
+File, search, command, Job, and development-session operations all retain this
+workspace scope. Paths outside every configured root, `..` traversal, and
+symlinks escaping a root are rejected with `EWORKSPACE`.
+
+This is a daemon/MCP boundary. A person or an agent using direct SSH still has
+the Linux account permissions granted to that SSH connection.
 
 ---
 
@@ -127,10 +170,11 @@ node cli.js connect <connection-name>
 node cli.js health
 node cli.js ssh-health
 node cli.js health --route ssh
-node cli.js read /path/to/workspace/AGENTS.md
-node cli.js bash "pwd && ls -la" --cwd /path/to/workspace
-node cli.js bash "pwd && ls -la" --route ssh --json
-node cli.js write /path/to/workspace/tmp.txt --content "hello"
+node cli.js read projects:/AGENTS.md --connection <daemon> --route daemon
+node cli.js glob "**/*.js" --cwd openclaw:/software/app --connection <daemon> --route daemon
+node cli.js bash "pwd && ls -la" --cwd projects:/app --connection <daemon> --route daemon
+node cli.js bash "pwd && ls -la" --cwd /path/to/workspace --connection <ssh> --route ssh --json
+node cli.js write projects:/tmp.txt --content "hello" --connection <daemon> --route daemon
 ```
 
 Provision a daemon token for a new AI software or new computer:
@@ -330,20 +374,30 @@ SSH-first flow above is the recommended path for agents:
 npm run setup
 ```
 
-### Deploy remote daemon
+### Deploy or upgrade the remote daemon
 
-Only use this section for first-time server bootstrap or planned daemon
-maintenance. Normal client installs should not overwrite remote daemon files.
+Only one operator should deploy a daemon. Normal client installation must not
+overwrite an existing server. For 3.1, deploy the complete release together:
+`daemon/`, `packages/daemon-core/`, `server/`, and the root package files.
+Copying only `server/` keeps the legacy daemon working but does not provide the
+modular file, Job, or development-session services.
+
+On the remote server, install dependencies for both package roots and start the
+public development gateway:
 
 ```bash
-ssh USER@SERVER "mkdir -p /path/to/daemon"
-scp server/server.js server/agentport-manager.sh server/package.json USER@SERVER:/path/to/daemon/
-scp local/server/.env USER@SERVER:/path/to/daemon/
-ssh USER@SERVER
-cd /path/to/daemon
-npm install
-nohup bash agentport-manager.sh >> boot.log 2>&1 &
+cd /opt/agentport
+npm ci
+npm --prefix server ci
+npm run start:daemon
 ```
+
+Before activating an upgrade, validate the release in a separate directory.
+Keep the prior release available for rollback, update the service's release
+pointer, restart the service, then verify `GET /healthz` and an authenticated
+`node cli.js health --route daemon --json` call. Do not copy a real `.env` or a
+token into source control; keep them in the daemon's private configuration
+directory.
 
 ---
 
@@ -378,6 +432,9 @@ nohup bash agentport-manager.sh >> boot.log 2>&1 &
 | `remote_task` | Query async task |
 | `remote_config` | Config hot reload |
 | `remote_status` | Connection diagnostics |
+| `remote_job_logs` | Read incremental Job logs with a cursor |
+| `remote_project_*` | List, inspect, and run configured project actions |
+| `remote_session_*` | Create and manage isolated Worktree development sessions |
 
 For detailed usage, see [SKILL.md](./SKILL.md)
 
@@ -387,39 +444,33 @@ For detailed usage, see [SKILL.md](./SKILL.md)
 
 ```
 agentport/
-|-- SKILL.md                         # Complete agent documentation
-|-- README.md                        # This file (English)
-|-- README_CN.md                     # Chinese documentation
-|-- AGENT_GUIDE.md                   # Agent install and usage guide
-|-- index.js                         # MCP server main program
-|-- cli.js                           # CLI fallback for tools without native MCP
-|-- package.json                     # Client dependencies
-|-- agentport.example.json    # Public config template
-|-- sync.cjs                         # Variable sync script
-|-- test.cjs                         # Test script
-|-- LICENSE                          # MIT License
-|-- CHANGELOG.md                     # Version changelog
-|-- local/                           # Local private config directory
-|   |-- config-guide.md              # Configuration guide
-|   |-- connections.json.example     # Multi-server config example
-|   `-- server/
-|       `-- .env                     # Server config generated by sync.cjs
-`-- server/
-    |-- server.js                    # Remote daemon process
-    |-- agentport-manager.sh  # Process guardian script
-    |-- setup-autostart-agentport.sh           # Autostart config script
-    |-- dashboard.html               # Web Dashboard UI
-    |-- .env.example                 # Server config template
-    `-- package.json                 # Server dependencies
+|-- client/                         # Local MCP and CLI entrypoints
+|-- daemon/                         # Public gateway and daemon configuration loader
+|-- packages/
+|   |-- client-core/                 # Connection, project, and Session client runtime
+|   |-- client-transport/            # Daemon HTTP and lazy SSH transport
+|   |-- daemon-core/                 # Path guards, file, exec, Job, and Session services
+|   `-- shared/                      # Shared safety and request-context policies
+|-- server/                          # Legacy dashboard and management compatibility service
+|-- local/                           # Ignored private client configuration and logs
+|-- docs/                            # Architecture and development-session documentation
+|-- SKILL.md                         # Short runtime contract for AI agents
+|-- AGENT_GUIDE.md                   # Install and usage guide
+|-- cli.js / index.js                # Legacy-compatible CLI and MCP entrypoints
+|-- sync.cjs                         # Skill and MCP configuration synchronizer
+|-- test/                            # Cross-platform regression tests and test guide
+`-- CHANGELOG.md                     # Version history
 ```
 
 ## Configuration Files
 
 | File | Location | Description |
 |------|----------|-------------|
-| `agentport.json` | `local/` | Main configuration (copy from `agentport.example.json`) |
-| `connections.json` | `local/` | Multi-server connections (optional, see `connections.json.example`) |
-| `.env` | `server/` | Server configuration (auto-generated by `sync.cjs`) |
+| `local/connections.json` | Per client | Legacy-compatible SSH and daemon connection data |
+| `local/connections.v3.json` | Per client | Logical server, endpoint, identity, and token configuration |
+| `local/projects.json` | Per client | Named project profiles and standard commands |
+| daemon `.env` | Remote daemon | Port, tokens, execution limits, and workspace defaults |
+| `workspaces.json` | Remote daemon | Named workspace roots; see `daemon/workspaces.json.example` |
 
 See [`local/config-guide.md`](./local/config-guide.md) for detailed configuration guide.
 
@@ -464,70 +515,57 @@ promote its token with `client provision --admin` instead of editing remote
 
 ## Autostart Configuration
 
-### Method 1: Using setup-autostart-agentport.sh (Recommended)
+For a 3.1 daemon, use a user-level systemd unit. It keeps the public gateway
+under the account that owns the workspace and avoids duplicate manager scripts.
 
-```bash
-# SSH to remote server
-ssh USER@SERVER
-cd /path/to/daemon
-
-# Install autostart
-bash setup-autostart-agentport.sh install
-
-# Check status
-bash setup-autostart-agentport.sh status
-
-# Uninstall autostart
-bash setup-autostart-agentport.sh uninstall
-```
-
-### Method 2: Manual crontab configuration
-
-```bash
-# Edit crontab
-crontab -e
-
-# Add the following line
-@reboot /path/to/daemon/agentport-manager.sh # agentport autostart
-```
-
-### Method 3: Using systemd (Optional)
-
-Create `/etc/systemd/system/agentport.service`:
+Create `~/.config/systemd/user/agentport.service`:
 
 ```ini
 [Unit]
-Description=agentport daemon
-After=network.target
+Description=AgentPort development gateway
+After=network-online.target
 
 [Service]
 Type=simple
-User=your-user
-WorkingDirectory=/path/to/daemon
-ExecStart=/bin/bash /path/to/daemon/agentport-manager.sh
+WorkingDirectory=/opt/agentport
+Environment=AGENTPORT_ENV_PATH=/home/YOUR_USER/.agentport/daemon/.env
+ExecStart=/usr/bin/node /opt/agentport/daemon/server-entry.cjs
 Restart=always
 RestartSec=5
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 ```
 
-Then enable:
+Load, enable, and inspect it:
 
 ```bash
-sudo systemctl enable agentport
-sudo systemctl start agentport
+systemctl --user daemon-reload
+systemctl --user enable --now agentport.service
+systemctl --user status agentport.service
+curl -fsS http://127.0.0.1:3183/healthz
 ```
+
+Do not run multiple copies of `node server.js` or multiple manager scripts for
+the same port. The legacy `server/agentport-manager.sh` remains for older
+single-process deployments only.
 
 ---
 
 ## Security Features
 
-- **Workspace Isolation**: File operations restricted within `WORKSPACE_ROOT`
-- **Token Authentication**: Client token + admin token
-- **Path Restrictions**: Prevent unauthorized access
-- **Script Interpreter Whitelist**: Only allow safe interpreters
-- **Command Execution Limits**: Configurable `ALLOW_BASH_EXEC` and `ALLOWED_COMMANDS`
+- **Named workspace isolation**: File, search, exec, Job, and Session paths are
+  restricted to configured non-overlapping roots.
+- **Traversal and symlink protection**: `..` traversal and symlinks escaping an
+  authorized root are rejected.
+- **Token separation**: Use one `clientId=token` per machine and AI software;
+  keep tokens only in ignored local configuration or private daemon `.env`.
+- **Command policy**: Shell metacharacter policy, interpreter restrictions,
+  execution limits, queue limits, and process-tree cleanup protect execution.
+- **Explicit destructive actions**: Session merge, rollback, cleanup, and branch
+  deletion require explicit Session ID confirmation.
+- **Audit and redaction**: Audit logs are stored remotely and API responses mask
+  sensitive command and token material.
 
 ---
 

@@ -3,10 +3,10 @@ const fs = require('node:fs/promises');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
-const { createAgentPortGateway } = require('./daemon/modular-gateway.cjs');
-const { createDaemonConfigLoader, parseEnvText } = require('./daemon/config-loader.cjs');
-const { startLegacyProcess } = require('./daemon/legacy-process.cjs');
-const { createFileSearchService } = require('./packages/daemon-core/file-search-service.cjs');
+const { createAgentPortGateway } = require('../daemon/modular-gateway.cjs');
+const { createDaemonConfigLoader, parseEnvText } = require('../daemon/config-loader.cjs');
+const { startLegacyProcess } = require('../daemon/legacy-process.cjs');
+const { createFileSearchService } = require('../packages/daemon-core/file-search-service.cjs');
 
 function listen(server) {
   return new Promise((resolve, reject) => {

@@ -42,6 +42,10 @@ local/connections.v3.json.example -> local/connections.v3.json
 local/projects.json.example       -> local/projects.json
 ```
 
+Set `workspaceId` to the same stable identity advertised by the daemon (for
+example `projects`). It identifies the server deployment; it is not a local
+filesystem path and it is distinct from individual named workspace roots.
+
 A logical server can contain several endpoints:
 
 ```text
@@ -54,6 +58,26 @@ debian-main
 The client probes endpoint identity and health before each uncached selection.
 Mutating operations require matching `serverId` and `workspaceId`; long-running
 Jobs and development sessions require a daemon endpoint.
+
+## Named workspace paths
+
+The daemon decides which workspace roots a logical server exposes. Do not infer
+them from the local machine or a raw SSH home directory. Use a named path when
+the target is not the server's default workspace:
+
+```text
+projects:/app/src/index.js
+openclaw:/software/app
+workspace://openclaw/software/app
+```
+
+Relative paths resolve only inside the daemon's default workspace. The client
+keeps the returned `workspace`, `relativePath`, and `namedPath` so a follow-up
+operation does not silently move back to the default root. Files, search,
+commands, Jobs, and development sessions use the same named workspace scope.
+
+An SSH recovery endpoint is a separate transport with the Linux account's own
+permissions. It does not expand the daemon's named-workspace boundary.
 
 ## Recommended MCP configuration
 
@@ -90,7 +114,7 @@ Use the explicit V3 namespace for generic Jobs:
 ```bash
 node client/cli-entry.js v3 job start "pnpm test" \
   --server debian-main \
-  --cwd /home/YOUR_USER/projects/app \
+  --cwd projects:/app \
   --idempotency-key app:test:commit-a83f92
 node client/cli-entry.js v3 job logs <job-id> --cursor <cursor>
 ```

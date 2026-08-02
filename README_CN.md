@@ -1,11 +1,12 @@
-# agentport
+# AgentPort
 
-AI 远程开发网关：支持 MCP、CLI、SSH 恢复和持久 daemon Job。
+3.1 版远程开发网关：支持 MCP、CLI、SSH 恢复、持久 Job、Git Worktree
+开发会话，以及命名工作区隔离。
 
 让 AI Agent 通过稳定通道操作远程 Linux 服务器：读写文件、执行命令、查看诊断，并在原生 MCP transport 不稳定时继续恢复工作。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-2.5.0-blue)](https://github.com/knownothing20/agentport)
+[![Version](https://img.shields.io/badge/version-3.1.0-blue)](https://github.com/knownothing20/agentport)
 [English](./README.md)
 
 ---
@@ -48,6 +49,45 @@ AI 远程开发网关：支持 MCP、CLI、SSH 恢复和持久 daemon Job。
 | 动态连接 | 支持多服务器切换，无需重启 MCP |
 | 健康检查 | 自动检测远端服务状态 |
 | 编码处理 | 自动 base64 编码特殊字符，清理 CRLF/BOM |
+
+---
+
+## 命名工作区与安全边界
+
+3.1 支持同时暴露多个互不重叠的远程目录，而不会因此向 daemon 开放整台
+服务器。每个目录都有固定名称；重复或父子嵌套的目录会被拒绝。
+
+```json
+{
+  "default": "projects",
+  "roots": {
+    "projects": "/home/YOUR_USER/workspace",
+    "openclaw": "/home/YOUR_USER/.openclaw"
+  }
+}
+```
+
+将以上内容保存为 daemon 环境文件同目录的 `workspaces.json`，并在私有
+`.env` 中设置：
+
+```dotenv
+WORKSPACE_ROOT=/home/YOUR_USER/workspace
+DEFAULT_WORKSPACE=projects
+WORKSPACE_ROOTS_FILE=./workspaces.json
+```
+
+| 输入形式 | 含义 |
+| --- | --- |
+| `projects:/app/README.md` | `projects` 工作区内的明确路径 |
+| `openclaw:/software/app` | `openclaw` 工作区内的明确路径 |
+| `workspace://openclaw/software/app` | 命名工作区的 URI 形式 |
+| `relative/path` | 仅在默认工作区内解析 |
+
+文件读写、搜索、命令、Job 和开发会话都会保留对应的工作区边界。跨根路径、
+`..` 穿越以及借助软链接逃离根目录都会被拒绝并返回 `EWORKSPACE`。
+
+这限制的是 AgentPort daemon/MCP 通道；直接 SSH 仍然遵循该 Linux 用户本身
+拥有的系统权限。
 
 ---
 
@@ -136,24 +176,26 @@ cp agentport.example.json local/agentport.json
 node sync.cjs
 ```
 
-### 6. 部署远程守护进程
+### 6. 部署或升级远程 daemon
+
+远程 daemon 只应由一台运维机器部署一次。普通客户端安装不能覆盖已有的
+服务端。3.1 升级时必须一并部署完整 release：`daemon/`、
+`packages/daemon-core/`、`server/` 和根目录包文件。只复制 `server/` 虽然
+仍可运行旧兼容服务，但不会获得模块化文件服务、持久 Job 和开发会话能力。
+
+在远程 release 目录中安装两套依赖并启动：
 
 ```bash
-# 在远程服务器创建目录
-ssh USER@SERVER "mkdir -p /path/to/daemon"
-
-# 上传服务端文件到远程服务器
-scp server/server.js server/agentport-manager.sh server/package.json USER@SERVER:/path/to/daemon/
-
-# 上传生成的 .env 配置（步骤 4 由 sync.cjs 生成）
-scp local/server/.env USER@SERVER:/path/to/daemon/
-
-# SSH 到远程服务器
-ssh USER@SERVER
-cd /path/to/daemon
-npm install
-nohup bash agentport-manager.sh >> boot.log 2>&1 &
+cd /opt/agentport
+npm ci
+npm --prefix server ci
+npm run start:daemon
 ```
+
+升级前应在独立测试目录验证；激活时保留旧 release 以便回滚。切换 service
+指向后重启服务，并同时验证 `GET /healthz` 与带认证的
+`node cli.js health --route daemon --json`。真实 `.env` 和 Token 只能保留在
+远程私有配置目录，不能进入仓库。
 
 ### 7. 重启 AI 工具
 
@@ -193,6 +235,7 @@ node cli.js health
 | `remote_write` | 写入远程文件（自动清理 CRLF/BOM） |
 | `remote_stat` | 获取文件元信息 |
 | `remote_glob` | 按 glob 模式搜索 |
+| `remote_grep` | 在授权工作区内搜索文件内容 |
 | `remote_bash` | 执行远程命令 |
 | `remote_script` | 执行多行脚本 |
 | `remote_script_async` | 将多行脚本提交为持久后台任务 |
@@ -201,6 +244,9 @@ node cli.js health
 | `remote_task` | 查询异步任务 |
 | `remote_config` | 配置热重载 |
 | `remote_status` | 连接诊断 |
+| `remote_job_logs` | 使用 cursor 增量读取 Job 日志 |
+| `remote_project_*` | 查看、检查和执行项目预设操作 |
+| `remote_session_*` | 管理隔离的 Worktree 开发会话 |
 
 详细使用说明见 [SKILL.md](./SKILL.md)
 
@@ -210,39 +256,33 @@ node cli.js health
 
 ```
 agentport/
-├── SKILL.md                        # 完整说明文档
-├── README.md                       # 英文说明
-├── README_CN.md                    # 中文说明（本文件）
-├── index.js                        # MCP server 主程序
-├── package.json                    # 客户端依赖
-├── agentport.example.json   # 配置模板
-├── sync.cjs                        # 变量同步脚本
-├── test.cjs                        # 测试脚本
-├── .gitignore                      # Git 忽略配置
-├── LICENSE                         # MIT 许可证
-├── CHANGELOG.md                    # 版本变更日志
-├── local/                          # 本地配置目录
-│   ├── README.md                   # 配置说明文档
-│   ├── agentport.json       # 主配置（从模板复制）
-│   ├── connections.json.example    # 多服务器配置样例
-│   └── server/
-│       └── .env                    # 服务端配置（自动生成）
-└── server/
-    ├── server.js                   # 守护进程
-    ├── agentport-manager.sh # 进程守护脚本
-    ├── setup-autostart-agentport.sh          # 自启动配置脚本
-    ├── dashboard.html              # Web Dashboard UI
-    ├── .env.example                # 服务端配置模板
-    └── package.json                # 服务端依赖
+├── client/                         # 本地 MCP 与 CLI 入口
+├── daemon/                         # 公共 gateway 与 daemon 配置加载器
+├── packages/
+│   ├── client-core/                # 连接、项目与会话客户端运行时
+│   ├── client-transport/           # daemon HTTP 与按需 SSH transport
+│   ├── daemon-core/                # 路径防护、文件、执行、Job、会话服务
+│   └── shared/                     # 共享安全策略和请求上下文
+├── server/                         # Dashboard 与管理兼容服务
+├── local/                          # 被忽略的私有客户端配置与日志
+├── docs/                           # 架构和开发会话文档
+├── SKILL.md                        # Agent 的短运行约定
+├── AGENT_GUIDE.md                  # 安装和使用说明
+├── cli.js / index.js               # 兼容旧版本的 CLI 与 MCP 入口
+├── sync.cjs                        # Skill 与 MCP 配置同步工具
+├── test/                            # 跨平台回归测试和测试说明
+└── CHANGELOG.md                    # 版本历史
 ```
 
 ## 配置文件说明
 
 | 文件 | 位置 | 说明 |
 |------|------|------|
-| `agentport.json` | `local/` | 主配置（从 `agentport.example.json` 复制） |
-| `connections.json` | `local/` | 多服务器连接配置（可选，参考 `connections.json.example`） |
-| `.env` | `server/` | 服务端配置（由 `sync.cjs` 自动生成） |
+| `local/connections.json` | 每个客户端 | 兼容模式的 SSH 与 daemon 连接数据 |
+| `local/connections.v3.json` | 每个客户端 | 逻辑服务器、端点、身份和 Token 配置 |
+| `local/projects.json` | 每个客户端 | 项目 profile 与标准命令 |
+| daemon `.env` | 远程 daemon | 端口、Token、执行限制和默认工作区 |
+| `workspaces.json` | 远程 daemon | 命名工作区根目录，参考 `daemon/workspaces.json.example` |
 
 详细配置说明见 [`local/config-guide.md`](./local/config-guide.md)。
 
@@ -283,70 +323,53 @@ agentport 提供 Web Dashboard 用于监控和管理：
 
 ## 自启动配置
 
-### 方法 1：使用 setup-autostart-agentport.sh（推荐）
+3.1 daemon 建议使用 user-level systemd。它会以工作区所属用户运行，并避免
+多个 manager 脚本或多个 `node server.js` 争抢同一个端口。
 
-```bash
-# SSH 到远程服务器
-ssh USER@SERVER
-cd /path/to/daemon
-
-# 安装自启动
-bash setup-autostart-agentport.sh install
-
-# 查看状态
-bash setup-autostart-agentport.sh status
-
-# 卸载自启动
-bash setup-autostart-agentport.sh uninstall
-```
-
-### 方法 2：手动配置 crontab
-
-```bash
-# 编辑 crontab
-crontab -e
-
-# 添加以下行
-@reboot /path/to/daemon/agentport-manager.sh # agentport autostart
-```
-
-### 方法 3：使用 systemd（可选）
-
-创建 `/etc/systemd/system/agentport.service`：
+创建 `~/.config/systemd/user/agentport.service`：
 
 ```ini
 [Unit]
-Description=agentport daemon
-After=network.target
+Description=AgentPort development gateway
+After=network-online.target
 
 [Service]
 Type=simple
-User=your-user
-WorkingDirectory=/path/to/daemon
-ExecStart=/bin/bash /path/to/daemon/agentport-manager.sh
+WorkingDirectory=/opt/agentport
+Environment=AGENTPORT_ENV_PATH=/home/YOUR_USER/.agentport/daemon/.env
+ExecStart=/usr/bin/node /opt/agentport/daemon/server-entry.cjs
 Restart=always
 RestartSec=5
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 ```
 
-然后启用：
+加载、启用并检查：
 
 ```bash
-sudo systemctl enable agentport
-sudo systemctl start agentport
+systemctl --user daemon-reload
+systemctl --user enable --now agentport.service
+systemctl --user status agentport.service
+curl -fsS http://127.0.0.1:3183/healthz
 ```
+
+旧的 `server/agentport-manager.sh` 仅保留给历史的单进程部署兼容使用。
 
 ---
 
 ## 安全特性
 
-- **工作区隔离**：文件操作限制在 `WORKSPACE_ROOT` 内
-- **Token 鉴权**：客户端 token + admin token
-- **路径限制**：防止越权访问
-- **脚本解释器白名单**：仅允许安全解释器
-- **命令执行限制**：可配置 `ALLOW_BASH_EXEC` 和 `ALLOWED_COMMANDS`
+- **命名工作区隔离**：文件、搜索、执行、Job 和会话都限制在明确配置且互不
+  重叠的根目录内。
+- **路径与软链接防护**：拒绝 `..` 穿越以及通过软链接离开授权根目录。
+- **Token 隔离**：每台机器、每个 AI 软件使用独立 `clientId=token`；Token 只
+  能保留在被忽略的本地配置或远程私有 `.env`。
+- **命令策略**：统一处理 shell 元字符、解释器限制、超时、并发队列和进程树
+  清理。
+- **显式破坏性操作**：会话合并、回滚、清理和分支删除均要求明确的 Session ID
+  确认。
+- **审计与脱敏**：审计日志留在远程端，API 响应会隐藏 Token 与敏感命令内容。
 
 ---
 

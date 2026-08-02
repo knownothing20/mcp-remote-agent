@@ -3,9 +3,9 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
-const { createCommandPolicy } = require("./packages/daemon-core/command-policy.cjs");
-const { createExecutionQueue } = require("./packages/daemon-core/execution-queue.cjs");
-const { createExecService } = require("./packages/daemon-core/exec-service.cjs");
+const { createCommandPolicy } = require("../packages/daemon-core/command-policy.cjs");
+const { createExecutionQueue } = require("../packages/daemon-core/execution-queue.cjs");
+const { createExecService } = require("../packages/daemon-core/exec-service.cjs");
 
 function shellArg(value) {
   const text = String(value);

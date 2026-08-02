@@ -1,5 +1,5 @@
 const assert = require("assert");
-const { isForbiddenPath, scanContent } = require("./scripts/check-privacy.cjs");
+const { isForbiddenPath, scanContent } = require("../scripts/check-privacy.cjs");
 
 function content(value) {
   return Buffer.from(value, "utf8");

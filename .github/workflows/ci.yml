@@ -38,16 +38,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - run: node test-architecture.cjs
-      - run: node test-daemon-gateway.cjs
-      - run: node test-exec-core.cjs
-      - run: node test-client-runtime.cjs
-      - run: node test-client-development-sessions.cjs
-      - run: node test-project-lock.cjs
-      - run: node test-development-session-service.cjs
-      - run: node test-development-gateway.cjs
-      - run: node test-client-redaction.cjs
-      - run: node test-daemon-response-redaction.cjs
+      - run: node test/test-architecture.cjs
+      - run: node test/test-daemon-gateway.cjs
+      - run: node test/test-exec-core.cjs
+      - run: node test/test-client-runtime.cjs
+      - run: node test/test-client-development-sessions.cjs
+      - run: node test/test-project-lock.cjs
+      - run: node test/test-development-session-service.cjs
+      - run: node test/test-development-gateway.cjs
+      - run: node test/test-client-redaction.cjs
+      - run: node test/test-daemon-response-redaction.cjs
+      - run: node test/test-named-workspaces.cjs
 
   windows-jobs:
     name: Job Service (windows-latest, Node ${{ matrix.node }})
@@ -61,9 +62,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - run: node test-job-service.cjs
-      - run: node test-daemon-exec-jobs.cjs
-      - run: node test-daemon-exec-jobs.cjs
+      - run: node test/test-job-service.cjs
+      - run: node test/test-daemon-exec-jobs.cjs
+      - run: node test/test-daemon-exec-jobs.cjs
 
   durable-linux:
     name: Legacy, durable jobs, Worktrees, and MCP V3 (Ubuntu, Node 22)
@@ -76,15 +77,15 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:lifecycle
-      - run: node test-job-service.cjs
-      - run: node test-job-worker-readiness.cjs
-      - run: node test-daemon-exec-jobs.cjs
-      - run: node test-project-lock.cjs
-      - run: node test-development-session-service.cjs
-      - run: node test-development-gateway.cjs
-      - run: node test-client-mcp-v3.cjs
-      - run: node test-mcp-redaction.cjs
-      - run: node test-daemon-response-redaction.cjs
+      - run: node test/test-job-service.cjs
+      - run: node test/test-job-worker-readiness.cjs
+      - run: node test/test-daemon-exec-jobs.cjs
+      - run: node test/test-project-lock.cjs
+      - run: node test/test-development-session-service.cjs
+      - run: node test/test-development-gateway.cjs
+      - run: node test/test-client-mcp-v3.cjs
+      - run: node test/test-mcp-redaction.cjs
+      - run: node test/test-daemon-response-redaction.cjs
       - run: npm audit --audit-level=moderate
       - name: Clean-install and verify legacy daemon dependencies
         run: |

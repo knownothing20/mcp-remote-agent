@@ -6,7 +6,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 
-const ROOT = __dirname;
+const ROOT = path.resolve(__dirname, "..");
 
 function shellArg(value) {
   const text = String(value);
@@ -159,7 +159,7 @@ async function testReleaseMetadataAndSync() {
 async function testOperationalHardening() {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentport-hardening-"));
   try {
-    const { createAuditLogWriter } = require("./server/audit-log.cjs");
+    const { createAuditLogWriter } = require("../server/audit-log.cjs");
     const auditPath = path.join(tempRoot, "audit.log");
     const writer = createAuditLogWriter({ filePath: auditPath, maxBytes: 1024, maxFiles: 2 });
     await writer.append({ seq: 1, payload: "a".repeat(700) });
@@ -176,7 +176,7 @@ async function testOperationalHardening() {
     const serverSource = await fs.readFile(path.join(ROOT, "server", "server.js"), "utf8");
     assert.match(serverSource, /if \(!authenticated\)/);
 
-    const { createJobStore } = require("./packages/daemon-core/job-store.cjs");
+    const { createJobStore } = require("../packages/daemon-core/job-store.cjs");
     const jobsDir = path.join(tempRoot, "jobs");
     const store = createJobStore({ jobsDir });
     const job = await store.create({ command: "echo ok" });
@@ -191,7 +191,7 @@ async function testOperationalHardening() {
 }
 
 async function testDaemonFileServices() {
-  const { createFileReadService, createFileWriteService } = require("./packages/daemon-core/index.cjs");
+  const { createFileReadService, createFileWriteService } = require("../packages/daemon-core/index.cjs");
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentport-core-"));
   try {
     const reader = createFileReadService({ workspaceRoot: tempRoot });
@@ -232,7 +232,7 @@ async function testDaemonFileServices() {
 }
 
 async function testSymlinkEscapeGuard() {
-  const { createFileReadService } = require("./packages/daemon-core/index.cjs");
+  const { createFileReadService } = require("../packages/daemon-core/index.cjs");
   const tempBase = await fs.mkdtemp(path.join(os.tmpdir(), "agentport-symlink-"));
   const workspace = path.join(tempBase, "workspace");
   const outside = path.join(tempBase, "outside");

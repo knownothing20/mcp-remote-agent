@@ -6,6 +6,8 @@ const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
 
+const ROOT = path.resolve(__dirname, "..");
+
 function listen(server) {
   return new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -35,7 +37,7 @@ function run(command, args, options = {}) {
 
 async function main() {
   const secret = "agentport-test-secret-do-not-print";
-  const { redactSensitive } = await import("./packages/client-core/redaction.js");
+  const { redactSensitive } = await import("../packages/client-core/redaction.js");
   const unit = redactSensitive({
     endpoint: { authToken: secret, password: "password-value", url: `http://localhost/?token=${secret}` },
     nested: [{ privateKey: "PRIVATE-KEY-DATA" }],
@@ -78,7 +80,7 @@ async function main() {
     }, null, 2));
     await fs.writeFile(projectsPath, JSON.stringify({ projects: {} }));
 
-    const { loadConnectionRegistry } = await import("./packages/client-core/connection-registry.js");
+    const { loadConnectionRegistry } = await import("../packages/client-core/connection-registry.js");
     const registry = await loadConnectionRegistry({ filePath: connectionsPath, baseDir: root });
     const internalEndpoint = registry.getEndpoint("redaction-lan").endpoint;
     assert.equal(internalEndpoint.authToken, secret);
@@ -87,7 +89,7 @@ async function main() {
     assert.match(serializedRegistry, /REDACTED/);
 
     process.env.AGENTPORT_CLIENT_STATE_PATH = statePath;
-    const { createClientRuntime } = await import("./packages/client-core/client-runtime.js");
+    const { createClientRuntime } = await import("../packages/client-core/client-runtime.js");
     const runtime = await createClientRuntime({
       baseDir: root,
       connectionsPath,
@@ -104,12 +106,12 @@ async function main() {
     }
 
     const cli = await run(process.execPath, [
-      path.join(__dirname, "client", "cli-entry.js"),
+      path.join(ROOT, "client", "cli-entry.js"),
       "server", "health", "redaction-server", "--force", "--json",
       "--connections", connectionsPath,
       "--projects", projectsPath,
     ], {
-      cwd: __dirname,
+      cwd: ROOT,
       env: { ...process.env, AGENTPORT_CLIENT_STATE_PATH: statePath },
     });
     assert.equal(cli.code, 0, cli.stderr || cli.stdout);

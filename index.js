@@ -171,12 +171,12 @@ function withRuntimeMeta(obj = {}) {
 
 function runtimeModeHint() {
   if (_runtimeMode.mode === "native-mcp") {
-    return "建议先运行 node test.cjs --probe --mode=native-mcp 检查注入链路。";
+    return "建议先运行 node test/test.cjs --probe --mode=native-mcp 检查注入链路。";
   }
   if (_runtimeMode.mode === "executable-skill") {
-    return "建议先运行 node test.cjs --probe --mode=executable-skill 检查技能直连链路。";
+    return "建议先运行 node test/test.cjs --probe --mode=executable-skill 检查技能直连链路。";
   }
-  return "建议先运行 node test.cjs --probe --mode=auto 检查自动模式探测结果。";
+  return "建议先运行 node test/test.cjs --probe --mode=auto 检查自动模式探测结果。";
 }
 
 const _runtimeMode = resolveRuntimeMode();

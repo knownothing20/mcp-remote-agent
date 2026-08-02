@@ -39,7 +39,7 @@ async function main() {
   });
   const port = await listen(daemon);
   try {
-    const { createDevelopmentSessionClient } = await import('./packages/client-core/development-sessions.js');
+    const { createDevelopmentSessionClient } = await import('../packages/client-core/development-sessions.js');
     const server = {
       id: 'server-main', workspaceId: 'workspace-main',
       endpoints: [{ id: 'daemon-lan', type: 'daemon', scope: 'lan', url: `http://127.0.0.1:${port}`, priority: 1, clientId: 'client-a', authToken: 'secret' }],

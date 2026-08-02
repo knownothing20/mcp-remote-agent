@@ -6,6 +6,8 @@ const os = require("node:os");
 const path = require("node:path");
 const readline = require("node:readline");
 
+const ROOT = path.resolve(__dirname, "..");
+
 function listen(server) {
   return new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -87,8 +89,8 @@ async function main() {
     },
   }, null, 2));
 
-  const child = spawn(process.execPath, [path.join(__dirname, "client", "mcp-entry.js")], {
-    cwd: __dirname,
+  const child = spawn(process.execPath, [path.join(ROOT, "client", "mcp-entry.js")], {
+    cwd: ROOT,
     stdio: ["pipe", "pipe", "pipe"],
     env: {
       ...process.env,
